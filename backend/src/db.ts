@@ -493,6 +493,22 @@ export interface EvaluationReport {
     skillGaps?: { conceptId: string; level: number; levelTitle: string; strand: string }[];
   }
 
+export interface AutoFlagDetails {
+  questionId: string;
+  questionText: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  level: number;
+  conceptId?: string;
+  topic?: string;
+  attempts: number;
+  failures: number;
+  failureRate: number; // percentage, e.g. 66.7
+  expectedAnswer: string;
+  affectedSchools?: string[];
+  recommendedBand?: 'medium' | 'hard' | 'same_cohort';
+  lastDetectedAt: string;
+}
+
 export interface Ticket {
   id: string;
   userId: string;
@@ -504,6 +520,13 @@ export interface Ticket {
   description: string;
   status: 'Open' | 'Reviewed' | 'Resolved';
   createdAt: string;
+  isAutoFlag?: boolean;
+  flagDetails?: AutoFlagDetails;
+  resolutionNote?: string;
+  reclassifiedBand?: 'easy' | 'medium' | 'hard' | 'confirmed';
+  actionTaken?: string;
+  actionTakenAt?: string;
+  actionTakenBy?: string;
 }
 
 export interface LogEntry {
@@ -2187,19 +2210,67 @@ export class DBStore {
   }
 
   async addTicket(t: Ticket) {
-    await this.mongoDb!.collection('tickets').insertOne(t);
+    if (this.mongoDb) await this.mongoDb.collection('tickets').insertOne(t);
     if (this.data) this.data.tickets.push(t);
     return t;
   }
 
   async updateTicket(id: string, updates: Partial<Ticket>) {
-    await this.mongoDb!.collection('tickets').updateOne({ id }, { $set: updates });
-    const t = await this.mongoDb!.collection<Ticket>('tickets').findOne({ id });
-    if (t && this.data) {
+    if (this.mongoDb) await this.mongoDb.collection('tickets').updateOne({ id }, { $set: updates });
+    let t: Ticket | null = null;
+    if (this.mongoDb) t = await this.mongoDb.collection<Ticket>('tickets').findOne({ id });
+    if (this.data) {
       const idx = this.data.tickets.findIndex(x => x.id === id);
-      if (idx !== -1) this.data.tickets[idx] = t;
+      if (idx !== -1) {
+        this.data.tickets[idx] = { ...this.data.tickets[idx], ...updates };
+        t = this.data.tickets[idx];
+      }
     }
     return t || undefined;
+  }
+
+  async resetAutoFlagState() {
+    if (this.mongoDb) {
+      // Clear all auto-flag tickets
+      await this.mongoDb.collection('tickets').deleteMany({
+        $or: [{ isAutoFlag: true }, { id: { $regex: '^flag_' } }, { subject: { $regex: '^\\[AUTO-FLAG' } }]
+      });
+      // Clear diagnostic and temporary demo submissions
+      await this.mongoDb.collection('answerSubmissions').deleteMany({
+        $or: [{ worksheetId: 'diagnostic' }, { worksheetId: 'ws_demo_live_01' }, { id: { $regex: '^sub_diag_' } }]
+      });
+      // Clear diagnostic evaluation reports
+      await this.mongoDb.collection('evaluationReports').deleteMany({
+        $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^rep_diag_' } }]
+      });
+      // Reset demo students' diagnostic status for live mentor testing
+      const demoStudentIds = [
+        'st_gps_01', 'st_gps_02', 'st_gps_03', 'st_gps_04', 'st_gps_05',
+        's_AP_GNT_GNT_01_01_C2_01', 's_AP_GNT_GNT_01_01_C2_02', 's_AP_GNT_GNT_01_01_C2_03', 's_AP_GNT_GNT_01_01_C2_04', 's_AP_GNT_GNT_01_01_C2_05'
+      ];
+      await this.mongoDb.collection('students').updateMany(
+        { id: { $in: demoStudentIds } },
+        { $set: { currentLevel: 0, currentSubLevel: undefined, assignedDiagnosticQuestions: [] } }
+      );
+    }
+    if (this.data) {
+      this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !t.id.startsWith('flag_') && !t.subject.startsWith('[AUTO-FLAG'));
+      this.data.answerSubmissions = this.data.answerSubmissions.filter(s => s.worksheetId !== 'diagnostic' && s.worksheetId !== 'ws_demo_live_01' && !s.id.startsWith('sub_diag_'));
+      this.data.evaluationReports = this.data.evaluationReports.filter(r => r.worksheetId !== 'diagnostic' && !r.id.startsWith('rep_diag_'));
+      const demoStudentIds = [
+        'st_gps_01', 'st_gps_02', 'st_gps_03', 'st_gps_04', 'st_gps_05',
+        's_AP_GNT_GNT_01_01_C2_01', 's_AP_GNT_GNT_01_01_C2_02', 's_AP_GNT_GNT_01_01_C2_03', 's_AP_GNT_GNT_01_01_C2_04', 's_AP_GNT_GNT_01_01_C2_05'
+      ];
+      if (this.data.students) {
+        this.data.students.forEach(st => {
+          if (demoStudentIds.includes(st.id)) {
+            st.currentLevel = 0;
+            st.currentSubLevel = undefined;
+            st.assignedDiagnosticQuestions = [];
+          }
+        });
+      }
+    }
   }
 
   async updateUser(userId: string, updates: Partial<User>) {

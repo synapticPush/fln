@@ -12,6 +12,7 @@ import { invalidateFingerprintCache } from './misconceptions';
 import { assignStudentToArchetype } from '../studentArchetypeService';
 import { CURRICULUM_MAPPING } from '../config/curriculumMap';
 import { directPrerequisites, describeConcept } from '../competencyPrerequisites';
+import { autoFlagService } from '../services/autoFlagService';
 
 export function registerEvaluationRoutes(app: express.Express) {
 
@@ -1301,6 +1302,11 @@ export function registerEvaluationRoutes(app: express.Express) {
         }
       });
     }
+
+    // Trigger Automated Pedagogical Quality Audit (SRS Rule R-15) asynchronously
+    autoFlagService.checkAndFlagQuestions({ worksheetId }).catch(err => {
+      console.warn('Background auto-flag evaluation check warning:', err);
+    });
 
     res.json({ submission, report, evaluation });
   });

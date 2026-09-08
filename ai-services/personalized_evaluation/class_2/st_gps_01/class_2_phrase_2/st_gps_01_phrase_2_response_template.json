@@ -1,0 +1,66 @@
+{
+  "student_id": "st_gps_01",
+  "student_name": "st_gps_01",
+  "enrolled_class": 2,
+  "test_date": "2026-08-26",
+  "phrase": "phrase_2",
+  "exam_id": "PERSONALIZED_C2_WORKSHEET_PHRASE_1_st_gps_01",
+  "answers": {
+    "Q1": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q2": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q3": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q4": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q5": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q6": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q7": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q8": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q9": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q10": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q38": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q39": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q51": {
+      "answer": "",
+      "confidence": 0.0
+    },
+    "Q52": {
+      "answer": "",
+      "confidence": 0.0
+    }
+  }
+}

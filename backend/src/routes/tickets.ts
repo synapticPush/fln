@@ -57,13 +57,56 @@ export function registerTicketRoutes(app: express.Express) {
     res.json(newTicket);
   });
 
-  app.post('/api/tickets/:id/resolve', async (req, res) => {
+  const handleResolveTicket = async (req: express.Request, res: express.Response) => {
     const user = getAuthUser(req);
     if (!user || user.role !== UserRole.SUPERADMIN) {
       return res.status(403).json({ error: 'Forbidden. Superadmin only.' });
     }
-    const { status } = req.body; // Reviewed or Resolved
-    const updated = await dbStore.updateTicket(req.params.id, { status });
+    const { status, resolutionNote, reclassifiedBand, actionTaken } = req.body; // Reviewed or Resolved
+    const updates: Partial<Ticket> = {
+      status,
+      actionTakenAt: new Date().toISOString(),
+      actionTakenBy: user.email
+    };
+    if (resolutionNote !== undefined) updates.resolutionNote = resolutionNote;
+    if (reclassifiedBand !== undefined) updates.reclassifiedBand = reclassifiedBand;
+
+    let derivedAction = actionTaken;
+    if (!derivedAction) {
+      if (reclassifiedBand === 'confirmed') {
+        derivedAction = 'Confirmed in Current Cohort';
+      } else if (reclassifiedBand) {
+        derivedAction = `Reclassified to ${reclassifiedBand.toUpperCase()}`;
+      } else if (resolutionNote) {
+        derivedAction = resolutionNote;
+      } else if (status === 'Reviewed') {
+        derivedAction = 'Marked as Reviewed';
+      } else {
+        derivedAction = 'Verified & Resolved';
+      }
+    }
+    updates.actionTaken = derivedAction;
+
+    const updated = await dbStore.updateTicket(req.params.id, updates);
+
+    // Audit log entry for governance logbook
+    await dbStore.addLog({
+      id: 'log_' + Date.now(),
+      timestamp: new Date().toISOString(),
+      schoolId: '',
+      schoolName: 'Superadmin Review Queue',
+      userId: user.id,
+      userEmail: user.email,
+      userRole: user.role,
+      activityType: 'ticket',
+      status: 'Success',
+      details: `Superadmin executed action on Ticket #${req.params.id}: "${derivedAction}"`
+    });
+
     res.json(updated);
-  });
+  };
+
+  app.post('/api/tickets/:id/resolve', handleResolveTicket);
+  app.put('/api/tickets/:id', handleResolveTicket);
 }
+
