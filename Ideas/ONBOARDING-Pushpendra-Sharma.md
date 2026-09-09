@@ -2,8 +2,8 @@
 
 **Contributor:** Pushpendra Sharma  
 **Target Milestone:** Version 1.0 Curriculum Quality Assurance & Governance  
-**Implemented Feature:** Automated Pedagogical Level-Flagging Engine ([SRS.md §6.7 & §13.2 Rule R-15](file:///d:/fln/SRS.md#L772))  
-**Document Format:** Mandatory Onboarding Specification per [README.md Rules](file:///d:/fln/README.md#L125)
+**Planned Contribution:** Automated Pedagogical Level-Flagging Engine ([SRS.md §6.7 & §13.2 Rule R-15](../SRS.md#L772))  
+**Document Format:** Mandatory Onboarding Specification per [README.md Rules](../README.md#rules)
 
 ---
 
@@ -58,7 +58,7 @@ The FLN platform operates as a multi-tier, hierarchical socio-technical system l
 
 | # | Where (File / Component) | What is Missing / Flawed | Why it Matters (Impact) |
 |---|---|---|---|
-| 1 | **[SRS.md §6.7 & §13.2 Rule R-15](file:///d:/fln/SRS.md#L772)** / **[AUDIT.md §3.3](file:///d:/fln/AUDIT.md#L125)** | **Missing Automated Pedagogical Level-Flagging Service**: The SRS explicitly mandates that when $\ge 50\%$ of students fail an "easy"-tagged question, the system must auto-flag the item for Superadmin review. In the codebase, this rule was completely unbuilt—flagged questions went unnoticed unless a teacher filed a manual ticket. | Flawed questions, ambiguous wording, or wrong answer keys silently distorted student levels and certification metrics across thousands of children without detection. |
+| 1 | **[SRS.md §6.7 & §13.2 Rule R-15](../SRS.md#L772)** / **[AUDIT.md §3.3](../AUDIT.md#L125)** | **Missing Automated Pedagogical Level-Flagging Service**: The SRS explicitly mandates that when $\ge 50\%$ of students fail an "easy"-tagged question, the system must auto-flag the item for Superadmin review. In the codebase, this rule was completely unbuilt—flagged questions went unnoticed unless a teacher filed a manual ticket. | Flawed questions, ambiguous wording, or wrong answer keys silently distorted student levels and certification metrics across thousands of children without detection. |
 | 2 | `backend/src/routes/evaluation.ts` (Issue #234) | **Gemma 4 Vision Answer Segmentation on Large Sheets**: On multi-question scans with 40+ items, Gemma 4 vision model concatenated multiple answers into single string tokens. | Causes misalignment between extracted answers and answer-key fields during cloud OCR scans. |
 | 3 | `frontend/src/components/TicketSubmission.tsx` | **Review Queue lacked Automated Audit integration**: The Superadmin Review Queue only displayed manually submitted tickets, with no automated triage or failure rate diagnostic breakdown. | Superadmins had no centralized dashboard view to audit curriculum quality or inspect question failure statistics. |
 | 4 | `backend/src/paperGenerator.ts` / `db.ts` | **Certification distance logic was previously flat (`>= 5`)**: Earlier drafts checked a flat level threshold rather than grade-appropriate ceiling. | Class 4 students at Level 6 were incorrectly marked as certified. |
@@ -67,7 +67,7 @@ The FLN platform operates as a multi-tier, hierarchical socio-technical system l
 
 ## 5. Ideas for the Project
 
-1. **Idea 1 — Automated Pedagogical Level-Flagging Engine (Implemented as Contribution):**
+1. **Idea 1 — Automated Pedagogical Level-Flagging Engine (Planned Contribution):**
    * *What:* Implement a backend service that continuously analyzes student evaluation submissions, detects questions categorized as "Easy" where cohort failure rate $\ge 50\%$, and auto-routes structured diagnostic tickets to the Superadmin Review Queue.
    * *Why:* Directly fulfills SRS Rule R-15 and closes a major governance gap highlighted in AUDIT.md §3.3.
    * *How:* Aggregate question-level accuracy across answer submissions, compute failure ratios, and generate idempotent `LevelFlag` tickets with comprehensive diagnostic statistics.
@@ -82,62 +82,62 @@ The FLN platform operates as a multi-tier, hierarchical socio-technical system l
 
 ---
 
-## 6. Your Contribution
+## 6. Your Contribution (Planned Scope & Implementation Design)
 
-### 6.1 What Was Implemented
-I implemented the **Automated Pedagogical Level-Flagging Engine** ([SRS.md §6.7 & §13.2 Rule R-15](file:///d:/fln/SRS.md#L772)), fully wiring curriculum quality audit from backend data aggregation to the Superadmin Global Review Queue.
+### 6.1 Planned Implementation Plan
+For my onboarding contribution, I plan to design and build the **Automated Pedagogical Level-Flagging Engine** ([SRS.md §6.7 & §13.2 Rule R-15](../SRS.md#L772)), wiring curriculum quality audit from backend data aggregation to the Superadmin Global Review Queue.
 
-#### Key Components:
+#### Key Architectural Components:
 1. **Core Service (`backend/src/services/autoFlagService.ts`):**
-   * Aggregates all student answer submissions against question definitions.
-   * Filters for questions with `difficulty === 'easy'`.
-   * Evaluates if $\text{Attempts} \ge 2$ and $\frac{\text{Failures}}{\text{Attempts}} \ge 0.50$ ($50\%$ threshold).
-   * Generates structured `LevelFlag` tickets with question prompt, expected answer, attempt counts, failure counts, exact failure percentage, and affected schools.
-   * **Idempotent by Design:** If an open auto-flag ticket already exists for a question, the engine updates its statistics instead of generating duplicate tickets.
-   * Automatically records an audit entry in the `logbook` collection for compliance.
-   * Computes cohort summary KPIs (Total Flagged Questions, Critical Flags $\ge 70\%$, Average Failure Rate).
+   * Aggregate all student answer submissions against question definitions.
+   * Filter for questions with `difficulty === 'easy'`.
+   * Evaluate if $\text{Attempts} \ge 2$ and $\frac{\text{Failures}}{\text{Attempts}} \ge 0.50$ ($50\%$ threshold).
+   * Generate structured `LevelFlag` tickets containing question prompt, expected answer, attempt counts, failure counts, exact failure percentage, and affected schools.
+   * **Idempotent by Design:** If an open auto-flag ticket already exists for a question, the engine should update its statistics rather than creating duplicates.
+   * Record an audit entry in the `logbook` collection for compliance.
+   * Compute cohort summary KPIs (Total Flagged Questions, Critical Flags $\ge 70\%$, Average Failure Rate).
 
 2. **Backend API Endpoints (`backend/src/routes/governance.ts`, `backend/src/routes/tickets.ts`, `backend/src/index.ts`):**
-   * `POST /api/governance/auto-flag/scan`: Allows Superadmins to trigger an on-demand cohort quality audit scan.
-   * `GET /api/governance/auto-flag/summary`: Returns summary metrics and active auto-flag items.
-   * `POST /api/governance/auto-flag/reset`: Resets auto-flag state and test telemetry for repeatable verification.
-   * `PUT /api/tickets/:id` & `POST /api/tickets/:id/resolve`: Supports reclassification actions (Keep as Easy, Reclassify to Hard, Reclassify to Medium) with audit logbook traceability.
-   * **Automatic Post-Evaluation Trigger:** Integrated into `/api/evaluation/submit` in `backend/src/routes/evaluation.ts` so the audit scan runs asynchronously upon grading completed answer sheets.
+   * `POST /api/governance/auto-flag/scan`: Allow Superadmins to trigger an on-demand cohort quality audit scan.
+   * `GET /api/governance/auto-flag/summary`: Return summary metrics and active auto-flag items.
+   * `POST /api/governance/auto-flag/reset`: Reset auto-flag state and test telemetry for repeatable validation.
+   * `PUT /api/tickets/:id` & `POST /api/tickets/:id/resolve`: Support pedagogical reclassification actions (Keep as Easy, Reclassify to Hard, Reclassify to Medium) with audit logbook traceability.
+   * **Post-Evaluation Trigger:** Wire into `/api/evaluation/submit` so the audit scan runs asynchronously upon grading completed answer sheets.
 
 3. **Database Schema Extension (`backend/src/db.ts` & `frontend/src/types.ts`):**
-   * Defined `AutoFlagDetails` interface capturing question text, failure rates, attempt counts, level, and expected answer.
-   * Extended `Ticket` interface with `isAutoFlag?: boolean`, `flagDetails?: AutoFlagDetails`, `actionTaken`, `reclassifiedBand`, and `resolutionNote`.
-   * Added `resetAutoFlagState` to `DBStore` with defensive null-checks for MongoDB Atlas and local JSON fallback.
+   * Define `AutoFlagDetails` interface capturing question text, failure rates, attempt counts, level, and expected answer.
+   * Extend `Ticket` interface with `isAutoFlag?: boolean`, `flagDetails?: AutoFlagDetails`, `actionTaken`, `reclassifiedBand`, and `resolutionNote`.
+   * Add `resetAutoFlagState` to `DBStore` with defensive null-checks for MongoDB Atlas and local JSON fallback.
 
 4. **Superadmin Global Review Queue Enhancement (`frontend/src/components/TicketSubmission.tsx`):**
-   * Added an **Automated Pedagogical Quality Audit (SRS Rule R-15)** banner with live KPI counters (Total Flags, Critical Flags, Average Failure Rate).
-   * Added a **"Run Quality Audit Scan (R-15)"** button for one-click cohort analysis.
-   * Added filter tabs (`All Tickets`, `⚠️ Auto-Flags (SRS R-15)`, `Curriculum`, `General`).
-   * Designed a specialized diagnostic card for Auto-Flags displaying question prompts, expected keys, failure rates, and quick resolution buttons (`Mark Reviewed`, `Take Action: Keep as Easy`, `Take Action: Reclassify to Hard`, `Take Action: Keep as Medium`).
+   * Add an **Automated Pedagogical Quality Audit (SRS Rule R-15)** banner with live KPI counters (Total Flags, Critical Flags, Average Failure Rate).
+   * Add a **"Run Quality Audit Scan (R-15)"** button for one-click cohort analysis.
+   * Add filter tabs (`All Tickets`, `⚠️ Auto-Flags (SRS R-15)`, `Curriculum`, `General`).
+   * Provide a specialized diagnostic card for Auto-Flags displaying question prompts, expected keys, failure rates, and quick resolution buttons (`Mark Reviewed`, `Take Action: Keep as Easy`, `Take Action: Reclassify to Hard`, `Take Action: Keep as Medium`).
 
 5. **Live Walkthrough Controls (`TeacherDashboard.tsx` & `VolunteerDashboard.tsx`):**
-   * Added one-click live demonstration helpers (`⚡ Live Demo: Set Pending Diagnostic`, `▶ Run Diagnostic`, `⚡ Diagnostic Demo`, `↺ Reset`) allowing mentors to test the complete end-to-end diagnostic-to-autoflag pipeline live without manual database scripting.
+   * Provide one-click live demonstration helpers (`⚡ Live Demo: Set Pending Diagnostic`, `▶ Run Diagnostic`, `⚡ Diagnostic Demo`, `↺ Reset`) allowing mentors and reviewers to verify the complete diagnostic-to-autoflag pipeline live without manual database scripting.
 
-### 6.2 Files Changed
-* `backend/src/db.ts`: Added `AutoFlagDetails` interface, extended `Ticket` definition, added `resetAutoFlagState`.
-* `backend/src/services/autoFlagService.ts`: **[NEW]** Core pedagogical anomaly detection service.
-* `backend/src/routes/governance.ts`: **[NEW]** Wired governance scan, summary, and reset endpoints.
+### 6.2 Target Files
+* `backend/src/db.ts`: Add `AutoFlagDetails` interface, extend `Ticket` definition, add `resetAutoFlagState`.
+* `backend/src/services/autoFlagService.ts`: Core pedagogical anomaly detection service.
+* `backend/src/routes/governance.ts`: Governance scan, summary, and reset endpoints.
 * `backend/src/routes/tickets.ts`: Enhanced ticket resolution and audit logbook integration.
 * `backend/src/routes/evaluation.ts`: Post-evaluation asynchronous auto-flag trigger.
 * `backend/src/routes/students.ts`: Diagnostic questions indexing and reset-diagnostic helper.
-* `backend/src/index.ts`: Registered governance routes.
-* `frontend/src/types.ts`: Added `AutoFlagDetails` interface and updated `Ticket` definition in frontend.
-* `frontend/src/components/TicketSubmission.tsx`: Added Quality Audit banner, KPI metrics, auto-flag filtering tabs, and diagnostic question card rendering.
-* `frontend/src/components/Layout.tsx`: Mounted Review Queue & Tickets navigation item.
+* `backend/src/index.ts`: Register governance routes.
+* `frontend/src/types.ts`: Add `AutoFlagDetails` interface and update `Ticket` definition in frontend.
+* `frontend/src/components/TicketSubmission.tsx`: Quality Audit banner, KPI metrics, auto-flag filtering tabs, and diagnostic question card rendering.
+* `frontend/src/components/Layout.tsx`: Mount Review Queue & Tickets navigation item.
 * `frontend/src/components/dashboards/TeacherDashboard.tsx`: Live demo diagnostic and reset controls.
 * `frontend/src/components/dashboards/VolunteerDashboard.tsx`: Live demo diagnostic and reset controls.
-* `Ideas/ONBOARDING-Pushpendra-Sharma.md`: **[NEW]** Contributor onboarding document per repository guidelines.
+* `Ideas/ONBOARDING-Pushpendra-Sharma.md`: Contributor onboarding document per repository guidelines.
 
-### 6.3 What Was NOT Changed
-* Did not alter existing ICR OCR algorithms or blue-pen filters.
-* Did not change student level progression algorithms or pass/fail thresholds.
-* Did not break any existing database models or REST API contracts.
+### 6.3 Scope Boundaries (What Will NOT Be Changed)
+* Will not alter existing ICR OCR algorithms or blue-pen filters.
+* Will not change student level progression algorithms or pass/fail thresholds.
+* Will not break any existing database models or REST API contracts.
 
-### 6.4 Verification & Test Results
-* **Automated Verification:** Executed test suite confirming that when 3 out of 4 students fail an "easy" question ($75\%$ failure rate), the engine automatically creates a Level Flag ticket with exact metrics, updates existing flags idempotently on subsequent runs, and logs compliance entries to the logbook.
+### 6.4 Verification Strategy
+* **Automated Verification:** Test suite confirming that when students fail an "easy" question above the threshold, the engine automatically creates a Level Flag ticket with exact metrics, updates existing flags idempotently on subsequent runs, and logs compliance entries to the logbook.
 * **Type-Check & Build:** Verified with `npm run lint` across all npm workspaces—**0 errors**.
