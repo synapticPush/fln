@@ -40,8 +40,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPORT=$(cat /tmp/health-report.md)
-          EXISTING=$(gh issue list --state open --label repo-health --json number --jq '.[0].number')
-          if [ -n "$EXISTING" ]; then
+          EXISTING=$(gh issue list --state open --label repo-health --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
             gh issue comment "$EXISTING" --body "$REPORT"
           else
             gh issue create --title "Repo Health Check — attention needed" --label repo-health --body "$REPORT"
@@ -52,8 +52,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          EXISTING=$(gh issue list --state open --label repo-health --json number --jq '.[0].number')
-          if [ -n "$EXISTING" ]; then
+          EXISTING=$(gh issue list --state open --label repo-health --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
             gh issue comment "$EXISTING" --body "All checks passed as of $(date -u +%Y-%m-%d) — closing."
             gh issue close "$EXISTING"
           fi
