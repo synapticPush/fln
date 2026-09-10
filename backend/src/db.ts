@@ -1251,14 +1251,20 @@ export class DBStore {
   // --- Collection Accessors ---
 
   getUserSync(email: string): User | null {
+    const seed = this.getSeedData();
+    const seedUser = seed.users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (!this.data || !this.data.users) {
-      const seed = this.getSeedData();
-      return seed.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+      return seedUser || null;
     }
     const found = this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (found) return found;
-    const seed = this.getSeedData();
-    return seed.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+    if (found) {
+      if (seedUser) {
+        if (!found.schoolId && seedUser.schoolId) found.schoolId = seedUser.schoolId;
+        if (!found.assignedSchools && seedUser.assignedSchools) found.assignedSchools = seedUser.assignedSchools;
+      }
+      return found;
+    }
+    return seedUser || null;
   }
 
   async getUserByEmail(email: string): Promise<User | null> {
@@ -1272,6 +1278,11 @@ export class DBStore {
           email: { $regex: new RegExp(`^${cleanEmail.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') }
         });
         if (u) {
+          const seedUser = this.getUserSync(cleanEmail);
+          if (seedUser) {
+            if (!u.schoolId && seedUser.schoolId) u.schoolId = seedUser.schoolId;
+            if (!u.assignedSchools && seedUser.assignedSchools) u.assignedSchools = seedUser.assignedSchools;
+          }
           if (this.data && this.data.users) {
             const idx = this.data.users.findIndex(x => x.email.toLowerCase() === cleanEmail || x.id === u.id);
             if (idx >= 0) this.data.users[idx] = u;
@@ -1435,12 +1446,17 @@ export class DBStore {
       // Same collation as the find; required for the *_ci indexes.
       // Without the search path, countDocuments hits the existing
       // schoolId/teacherId indexes and does not need a collation.
+      let mongoCount = 0;
       if (search) {
-        return await this.mongoDb.collection('students').countDocuments(filter, { collation: { locale: 'en', strength: 2 } });
+        mongoCount = await this.mongoDb.collection('students').countDocuments(filter, { collation: { locale: 'en', strength: 2 } });
+      } else {
+        mongoCount = await this.mongoDb.collection('students').countDocuments(filter);
       }
-      return await this.mongoDb.collection('students').countDocuments(filter);
+      if (mongoCount > 0 || !opts?.schoolId) {
+        return mongoCount;
+      }
     }
-    let result = this.data?.students || [];
+    let result = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
     if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
     if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
     if (search) {
@@ -1934,8 +1950,13 @@ export class DBStore {
   }
 
   async getTickets() {
-    if (this.mongoDb) return await this.mongoDb.collection<Ticket>('tickets').find({}).toArray();
-    return this.data?.tickets || [];
+    const seedTickets = (this.data?.tickets && this.data.tickets.length > 0) ? this.data.tickets : this.getSeedData().tickets;
+    if (this.mongoDb) {
+      const list = await this.mongoDb.collection<Ticket>('tickets').find({}).toArray();
+      if (list && list.length > 0) return list;
+      return seedTickets;
+    }
+    return seedTickets;
   }
   async getLogbook() {
     if (this.mongoDb) return await this.mongoDb.collection<LogEntry>('logbook').find({}).toArray();
@@ -2351,10 +2372,17 @@ export class DBStore {
 
   async resetAutoFlagState() {
     if (this.mongoDb) {
-      // Clear all auto-flag tickets
+      // Clear all auto-flag tickets and test-generated tickets
       await this.mongoDb.collection('tickets').deleteMany({
-        $or: [{ isAutoFlag: true }, { id: { $regex: '^flag_' } }, { subject: { $regex: '^\\[AUTO-FLAG' } }]
+        $or: [
+          { isAutoFlag: true },
+          { id: { $regex: '^flag_' } },
+          { id: { $regex: '^tkt_' } },
+          { subject: { $regex: '^\\[AUTO-FLAG' } }
+        ]
       });
+      // Clear question difficulty overrides
+      await this.mongoDb.collection('questionDifficultyOverrides').deleteMany({});
       // Clear diagnostic submissions
       await this.mongoDb.collection('answerSubmissions').deleteMany({
         $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^sub_diag_' } }]
@@ -2370,9 +2398,16 @@ export class DBStore {
       );
     }
     if (this.data) {
-      this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !t.id.startsWith('flag_') && !t.subject.startsWith('[AUTO-FLAG'));
-      this.data.answerSubmissions = this.data.answerSubmissions.filter(s => s.worksheetId !== 'diagnostic' && !s.id.startsWith('sub_diag_'));
-      this.data.evaluationReports = this.data.evaluationReports.filter(r => r.worksheetId !== 'diagnostic' && !r.id.startsWith('rep_diag_'));
+      this.data.tickets = this.data.tickets.filter(
+        t => !t.isAutoFlag && !t.id.startsWith('flag_') && !t.id.startsWith('tkt_') && !t.subject.startsWith('[AUTO-FLAG')
+      );
+      (this.data as any).questionDifficultyOverrides = {};
+      this.data.answerSubmissions = this.data.answerSubmissions.filter(
+        s => s.worksheetId !== 'diagnostic' && !s.id.startsWith('sub_diag_')
+      );
+      this.data.evaluationReports = this.data.evaluationReports.filter(
+        r => r.worksheetId !== 'diagnostic' && !r.id.startsWith('rep_diag_')
+      );
       if (this.data.students) {
         this.data.students.forEach(st => {
           if ((st.assignedDiagnosticQuestions && st.assignedDiagnosticQuestions.length > 0) || st.currentLevel > 1) {
