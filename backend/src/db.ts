@@ -2276,6 +2276,84 @@ export class DBStore {
     return undefined;
   }
 
+  async updateQuestionDifficulty(questionId: string, newDifficulty: 'easy' | 'medium' | 'hard') {
+    if (this.mongoDb) {
+      try {
+        await this.mongoDb.collection('worksheets').updateMany(
+          { 'questions.question_id': questionId },
+          { $set: { 'questions.$[elem].difficulty': newDifficulty } },
+          { arrayFilters: [{ 'elem.question_id': questionId }] }
+        );
+        await this.mongoDb.collection('levelWorksheets').updateMany(
+          { 'questions.question_id': questionId },
+          { $set: { 'questions.$[elem].difficulty': newDifficulty } },
+          { arrayFilters: [{ 'elem.question_id': questionId }] }
+        );
+        await this.mongoDb.collection('questionBank').updateMany(
+          { questionId },
+          { $set: { difficulty: newDifficulty } }
+        );
+        await this.mongoDb.collection('questionDifficultyOverrides').updateOne(
+          { questionId },
+          { $set: { questionId, difficulty: newDifficulty, updatedAt: new Date().toISOString() } },
+          { upsert: true }
+        );
+      } catch (err) {
+        console.warn('Error updating question difficulty in Mongo:', err);
+      }
+    }
+    if (this.data) {
+      if (!(this.data as any).questionDifficultyOverrides) {
+        (this.data as any).questionDifficultyOverrides = {};
+      }
+      (this.data as any).questionDifficultyOverrides[questionId] = newDifficulty;
+
+      if (this.data.worksheets) {
+        for (const ws of this.data.worksheets) {
+          if (ws.questions && Array.isArray(ws.questions)) {
+            for (const q of ws.questions) {
+              if (q.question_id === questionId) {
+                q.difficulty = newDifficulty;
+              }
+            }
+          }
+        }
+      }
+      if (this.data.levelWorksheets) {
+        for (const ws of this.data.levelWorksheets) {
+          if (ws.questions && Array.isArray(ws.questions)) {
+            for (const q of ws.questions) {
+              if (q.question_id === questionId) {
+                q.difficulty = newDifficulty;
+              }
+            }
+          }
+        }
+      }
+      if (!this.mongoDb) await this.save();
+    }
+  }
+
+  async getQuestionDifficultyOverrides(): Promise<Record<string, 'easy' | 'medium' | 'hard'>> {
+    const map: Record<string, 'easy' | 'medium' | 'hard'> = {};
+    if (this.mongoDb) {
+      try {
+        const list = await this.mongoDb.collection('questionDifficultyOverrides').find().toArray();
+        for (const item of list) {
+          if (item.questionId && item.difficulty) {
+            map[item.questionId] = item.difficulty;
+          }
+        }
+      } catch (_e) {
+        // empty collection fallback
+      }
+    }
+    if (this.data && (this.data as any).questionDifficultyOverrides) {
+      Object.assign(map, (this.data as any).questionDifficultyOverrides);
+    }
+    return map;
+  }
+
   async resetAutoFlagState() {
     if (this.mongoDb) {
       // Clear all auto-flag tickets

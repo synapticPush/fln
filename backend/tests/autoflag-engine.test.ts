@@ -166,6 +166,107 @@ test('Autoflag Engine Unit Tests (SRS Rule R-15 & §6.7)', async (t) => {
     assert.equal(flag, undefined, 'Numeric variants like "05" and "5.0" should be treated as correct');
   });
 
+  await t.test('persists difficulty reclassification and prevents future flagging under old threshold', async () => {
+    const testWsReclass = {
+      id: 'test_ws_autoflag_reclass',
+      title: 'AutoFlag Reclass Test Worksheet',
+      level: 4,
+      schoolId: 'gps-mt-001',
+      createdAt: new Date().toISOString(),
+      questions: [
+        {
+          question_id: 'q_reclass_easy_1',
+          question: 'What is 3 + 3?',
+          answer: '6',
+          difficulty: 'easy' as const,
+          source_level: 4,
+          topic: 'Addition'
+        }
+      ]
+    };
+    await dbStore.addWorksheet(testWsReclass);
+
+    // Initial 4 submissions: 1 correct, 3 wrong (75% failure rate -> triggers initial easy flag)
+    await dbStore.addAnswerSubmission({ id: 'sub_rc_1', worksheetId: testWsReclass.id, studentId: 's1', schoolId: 'gps-mt-001', answers: { q_reclass_easy_1: '6' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_rc_2', worksheetId: testWsReclass.id, studentId: 's2', schoolId: 'gps-mt-001', answers: { q_reclass_easy_1: '7' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_rc_3', worksheetId: testWsReclass.id, studentId: 's3', schoolId: 'gps-mt-001', answers: { q_reclass_easy_1: '8' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_rc_4', worksheetId: testWsReclass.id, studentId: 's4', schoolId: 'gps-mt-001', answers: { q_reclass_easy_1: '9' }, submittedAt: new Date().toISOString() });
+
+    const initialScan = await autoFlagService.checkAndFlagQuestions({ worksheetId: testWsReclass.id, minAttempts: 3 });
+    const initialFlag = initialScan.created.find(f => f.flagDetails?.questionId === 'q_reclass_easy_1')
+      || initialScan.updated.find(f => f.flagDetails?.questionId === 'q_reclass_easy_1');
+
+    assert.ok(initialFlag, 'Initial easy flag should be created');
+
+    // Superadmin resolves ticket by reclassifying difficulty to 'medium'
+    await dbStore.updateQuestionDifficulty('q_reclass_easy_1', 'medium');
+    await dbStore.updateTicket(initialFlag.id, {
+      status: 'Resolved',
+      reclassifiedBand: 'medium',
+      actionTaken: 'Reclassified to MEDIUM',
+      flagDetails: { ...initialFlag.flagDetails!, difficulty: 'medium' }
+    });
+
+    // Add another submission: 1 correct (now 2 correct, 3 wrong = 60% failure rate)
+    // 60% failure is < 70% medium threshold, so it should NOT be flagged under medium
+    await dbStore.addAnswerSubmission({ id: 'sub_rc_5', worksheetId: testWsReclass.id, studentId: 's5', schoolId: 'gps-mt-001', answers: { q_reclass_easy_1: '6' }, submittedAt: new Date().toISOString() });
+
+    const secondScan = await autoFlagService.checkAndFlagQuestions({ worksheetId: testWsReclass.id, minAttempts: 3 });
+    const flaggedInSecond = secondScan.created.find(f => f.flagDetails?.questionId === 'q_reclass_easy_1');
+    assert.equal(flaggedInSecond, undefined, 'Reclassified question at 60% failure must not be re-flagged under easy threshold');
+
+    // Verify worksheet question was persisted with updated medium difficulty
+    const worksheets = await dbStore.getWorksheets();
+    const ws = worksheets.find(w => w.id === testWsReclass.id);
+    const qInWs = ws?.questions?.find(q => q.question_id === 'q_reclass_easy_1');
+    assert.equal(qInWs?.difficulty, 'medium', 'Worksheet question difficulty must be persisted as medium');
+  });
+
+  await t.test('unresolved question without difficulty change gets updated when more students fail', async () => {
+    const testWsUnresolved = {
+      id: 'test_ws_autoflag_unresolved',
+      title: 'AutoFlag Unresolved Test Worksheet',
+      level: 5,
+      schoolId: 'gps-mt-001',
+      createdAt: new Date().toISOString(),
+      questions: [
+        {
+          question_id: 'q_unresolved_easy_1',
+          question: 'What is 4 + 4?',
+          answer: '8',
+          difficulty: 'easy' as const,
+          source_level: 5,
+          topic: 'Addition'
+        }
+      ]
+    };
+    await dbStore.addWorksheet(testWsUnresolved);
+
+    // Initial submissions: 1 correct, 2 wrong (66.7% fail)
+    await dbStore.addAnswerSubmission({ id: 'sub_unres_1', worksheetId: testWsUnresolved.id, studentId: 'st_1', schoolId: 'gps-mt-001', answers: { q_unresolved_easy_1: '8' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_unres_2', worksheetId: testWsUnresolved.id, studentId: 'st_2', schoolId: 'gps-mt-001', answers: { q_unresolved_easy_1: '0' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_unres_3', worksheetId: testWsUnresolved.id, studentId: 'st_3', schoolId: 'gps-mt-001', answers: { q_unresolved_easy_1: '44' }, submittedAt: new Date().toISOString() });
+
+    const firstScan = await autoFlagService.checkAndFlagQuestions({ worksheetId: testWsUnresolved.id, minAttempts: 3 });
+    const flag = firstScan.created.find(f => f.flagDetails?.questionId === 'q_unresolved_easy_1');
+    assert.ok(flag, 'Should create flag for unresolved question');
+    assert.equal(flag.status, 'Open');
+    assert.equal(flag.flagDetails?.attempts, 3);
+    assert.equal(flag.flagDetails?.failures, 2);
+
+    // More students fail in future: add 2 more wrong submissions
+    await dbStore.addAnswerSubmission({ id: 'sub_unres_4', worksheetId: testWsUnresolved.id, studentId: 'st_4', schoolId: 'gps-mt-001', answers: { q_unresolved_easy_1: '1' }, submittedAt: new Date().toISOString() });
+    await dbStore.addAnswerSubmission({ id: 'sub_unres_5', worksheetId: testWsUnresolved.id, studentId: 'st_5', schoolId: 'gps-mt-001', answers: { q_unresolved_easy_1: '2' }, submittedAt: new Date().toISOString() });
+
+    const nextScan = await autoFlagService.checkAndFlagQuestions({ worksheetId: testWsUnresolved.id, minAttempts: 3 });
+    const updatedFlag = nextScan.updated.find(f => f.flagDetails?.questionId === 'q_unresolved_easy_1');
+    assert.ok(updatedFlag, 'Should update flag with new statistics');
+    assert.equal(updatedFlag.flagDetails?.attempts, 5);
+    assert.equal(updatedFlag.flagDetails?.failures, 4);
+    assert.equal(updatedFlag.flagDetails?.failureRate, 80);
+    assert.equal(updatedFlag.status, 'Open', 'Status remains Open for Superadmin action');
+  });
+
   await t.test('summary aggregation computes correct metrics', async () => {
     const summary = await autoFlagService.getAutoFlagSummary();
     assert.equal(typeof summary.totalFlagged, 'number');

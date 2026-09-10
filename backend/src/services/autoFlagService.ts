@@ -129,14 +129,32 @@ export class AutoFlagService {
     const updated: Ticket[] = [];
     const allFlags: Ticket[] = [];
 
+    const overrides = await dbStore.getQuestionDifficultyOverrides();
+
     // 3. Evaluate criteria:
+    // - Respect Superadmin difficulty reclassifications (saved in dbStore or resolved tickets)
     // - Only flag when attempts >= minAttempts (at least 3 attempts in cohort)
     // - Easy question with >= 50% failure rate (SRS Rule R-15)
     // - Medium question with >= 70% failure rate
-    // - Recommendation: if failureRate >= 85%, recommend reclassification; otherwise recommend keeping in same cohort / reviewing.
+    // - Hard question is not subject to easy/medium failure flags
     for (const [qId, stats] of statsMap.entries()) {
       const q = stats.question;
-      const diff = (q.difficulty || ((q.source_level && q.source_level <= 20) ? 'easy' : 'medium')).toLowerCase() as 'easy' | 'medium' | 'hard';
+      const ticketId = `flag_${q.question_id.replace(/[^a-zA-Z0-9_-]/g, '_')}_L${q.source_level || 1}`;
+      const existingTicket = existingTickets.find(
+        t => t.id === ticketId || t.flagDetails?.questionId === q.question_id
+      );
+
+      // Determine effective difficulty based on persisted overrides / resolved tickets
+      const resolvedReclassified = (existingTicket?.status === 'Resolved' && existingTicket?.reclassifiedBand && ['easy', 'medium', 'hard'].includes(existingTicket.reclassifiedBand))
+        ? existingTicket.reclassifiedBand as 'easy' | 'medium' | 'hard'
+        : undefined;
+
+      const diff = (
+        overrides[q.question_id] ||
+        resolvedReclassified ||
+        q.difficulty ||
+        ((q.source_level && q.source_level <= 20) ? 'easy' : 'medium')
+      ).toLowerCase() as 'easy' | 'medium' | 'hard';
       
       // Must have at least minAttempts in cohort to be statistically valid
       if (stats.attempts < minAttempts) continue;
@@ -161,7 +179,6 @@ export class AutoFlagService {
       if (!isAnomalous) continue;
 
       const schoolList = Array.from(stats.schools);
-      const ticketId = `flag_${q.question_id.replace(/[^a-zA-Z0-9_-]/g, '_')}_L${q.source_level || 1}`;
 
       const flagDetails: AutoFlagDetails = {
         questionId: q.question_id,
@@ -178,10 +195,6 @@ export class AutoFlagService {
         recommendedBand,
         lastDetectedAt: new Date().toISOString()
       };
-
-      const existingTicket = existingTickets.find(
-        t => t.id === ticketId || t.flagDetails?.questionId === q.question_id
-      );
 
       if (existingTicket) {
         // If the ticket is already Resolved or Reviewed by Admin, PRESERVE that status and action taken!
