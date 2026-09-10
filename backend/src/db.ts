@@ -172,6 +172,7 @@ export interface LevelWorksheet {
   answerKey: any;
   coords: any;
   generatedAt: string;
+  questions?: Question[];
 }
 
 export interface DiagnosticAnswerKey {
