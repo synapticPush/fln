@@ -17,7 +17,7 @@ export function registerTicketRoutes(app: express.Express) {
     res.json(filtered);
   });
 
-  app.post('/api/tickets/create', async (req, res) => {
+  const handleCreateTicket = async (req: express.Request, res: express.Response) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -55,7 +55,10 @@ export function registerTicketRoutes(app: express.Express) {
     });
 
     res.json(newTicket);
-  });
+  };
+
+  app.post('/api/tickets', handleCreateTicket);
+  app.post('/api/tickets/create', handleCreateTicket);
 
   const handleResolveTicket = async (req: express.Request, res: express.Response) => {
     const user = getAuthUser(req);

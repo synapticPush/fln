@@ -1251,8 +1251,14 @@ export class DBStore {
   // --- Collection Accessors ---
 
   getUserSync(email: string): User | null {
-    if (!this.data || !this.data.users) return null;
-    return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+    if (!this.data || !this.data.users) {
+      const seed = this.getSeedData();
+      return seed.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
+    }
+    const found = this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (found) return found;
+    const seed = this.getSeedData();
+    return seed.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
   }
 
   async getUserByEmail(email: string): Promise<User | null> {

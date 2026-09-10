@@ -97,9 +97,9 @@ export class AutoFlagService {
       for (const [qId, submittedAnswer] of Object.entries(sub.answers)) {
         let entry = statsMap.get(qId);
 
-        // If question wasn't indexed from worksheet, check if question object exists in matchingWs
+        // If question wasn't indexed from worksheet, check if question object exists in matchingWs or sub.questions
         if (!entry) {
-          const qObj = wsQuestions.find(q => q.question_id === qId);
+          const qObj = wsQuestions.find(q => q.question_id === qId) || (sub.questions && sub.questions.find((q: Question) => q.question_id === qId));
           if (qObj) {
             entry = {
               question: qObj,

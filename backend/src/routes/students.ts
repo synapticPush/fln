@@ -899,7 +899,7 @@ export function registerStudentRoutes(app: express.Express) {
     // existing report instead of re-running the pipeline and re-appending to
     // level history. A genuinely new diagnostic on a later date still runs
     // normally (legitimate re-assessment, not a duplicate retry).
-    const existingReports = await dbStore.getEvaluationReports();
+    const existingReports = await dbStore.getEvaluationReports({ studentIds: [student.id] });
     const existingReport = existingReports.find(r =>
       r.worksheetId === 'diagnostic' && r.studentId === student.id && r.timestamp.startsWith(dateStr)
     );

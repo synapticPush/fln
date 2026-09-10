@@ -1114,7 +1114,7 @@ export function registerEvaluationRoutes(app: express.Express) {
     const existingSubmissions = await dbStore.getAnswerSubmissions();
     const existingSubmission = existingSubmissions.find(s => s.worksheetId === worksheetId && s.studentId === studentId);
     if (existingSubmission) {
-      const existingReports = await dbStore.getEvaluationReports();
+      const existingReports = await dbStore.getEvaluationReports({ studentIds: [studentId] });
       const existingReport = existingReports
         .filter(r => r.worksheetId === worksheetId && r.studentId === studentId)
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
