@@ -81,12 +81,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, token,
     }
   };
 
-  const handlePrepareDemoStudent = async () => {
-    const target = students[0];
-    if (target) {
-      await handleResetDiagnostic(target);
-    }
-  };
 
   const fetchTeacherData = async () => {
     try {
@@ -225,13 +219,6 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, token,
           <p className="text-zinc-550 dark:text-zinc-400 text-sm mt-0.5 font-medium">Teacher: {user.name} · School Scope: gps-mt-001 Model Town</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={handlePrepareDemoStudent}
-            className="bg-amber-600 hover:bg-amber-700 text-white font-mono text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
-            title="Set a student to Pending Diagnostic for live mentor walkthrough"
-          >
-            ⚡ Live Demo: Set Pending Diagnostic
-          </button>
           <button
             onClick={() => setShowSkillGraph(true)}
             className="bg-white dark:bg-slate-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-mono text-xs font-semibold px-4 py-2.5 rounded-lg transition-colors cursor-pointer"

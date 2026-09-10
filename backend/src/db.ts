@@ -2248,22 +2248,32 @@ export class DBStore {
 
   async addTicket(t: Ticket) {
     if (this.mongoDb) await this.mongoDb.collection('tickets').insertOne(t);
-    if (this.data) this.data.tickets.push(t);
+    if (this.data) {
+      this.data.tickets.push(t);
+      if (!this.mongoDb) await this.save();
+    }
     return t;
   }
 
   async updateTicket(id: string, updates: Partial<Ticket>) {
-    if (this.mongoDb) await this.mongoDb.collection('tickets').updateOne({ id }, { $set: updates });
-    let t: Ticket | null = null;
-    if (this.mongoDb) t = await this.mongoDb.collection<Ticket>('tickets').findOne({ id });
+    if (this.mongoDb) {
+      await this.mongoDb.collection('tickets').updateOne({ id }, { $set: updates });
+      const t = await this.mongoDb.collection<Ticket>('tickets').findOne({ id });
+      if (t && this.data) {
+        const idx = this.data.tickets.findIndex(x => x.id === id);
+        if (idx !== -1) this.data.tickets[idx] = t;
+      }
+      return t || undefined;
+    }
     if (this.data) {
       const idx = this.data.tickets.findIndex(x => x.id === id);
       if (idx !== -1) {
         this.data.tickets[idx] = { ...this.data.tickets[idx], ...updates };
-        t = this.data.tickets[idx];
+        await this.save();
+        return this.data.tickets[idx];
       }
     }
-    return t || undefined;
+    return undefined;
   }
 
   async resetAutoFlagState() {
@@ -2272,67 +2282,87 @@ export class DBStore {
       await this.mongoDb.collection('tickets').deleteMany({
         $or: [{ isAutoFlag: true }, { id: { $regex: '^flag_' } }, { subject: { $regex: '^\\[AUTO-FLAG' } }]
       });
-      // Clear diagnostic and temporary demo submissions
+      // Clear diagnostic submissions
       await this.mongoDb.collection('answerSubmissions').deleteMany({
-        $or: [{ worksheetId: 'diagnostic' }, { worksheetId: 'ws_demo_live_01' }, { id: { $regex: '^sub_diag_' } }]
+        $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^sub_diag_' } }]
       });
       // Clear diagnostic evaluation reports
       await this.mongoDb.collection('evaluationReports').deleteMany({
         $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^rep_diag_' } }]
       });
-      // Reset demo students' diagnostic status for live mentor testing
-      const demoStudentIds = [
-        'st_gps_01', 'st_gps_02', 'st_gps_03', 'st_gps_04', 'st_gps_05',
-        's_AP_GNT_GNT_01_01_C2_01', 's_AP_GNT_GNT_01_01_C2_02', 's_AP_GNT_GNT_01_01_C2_03', 's_AP_GNT_GNT_01_01_C2_04', 's_AP_GNT_GNT_01_01_C2_05'
-      ];
+      // Reset diagnostic state on students
       await this.mongoDb.collection('students').updateMany(
-        { id: { $in: demoStudentIds } },
-        { $set: { currentLevel: 0, currentSubLevel: undefined, assignedDiagnosticQuestions: [] } }
+        { $or: [{ assignedDiagnosticQuestions: { $exists: true, $ne: [] } }, { currentLevel: { $gt: 1 } }] },
+        { $set: { currentLevel: 1, currentSubLevel: undefined, assignedDiagnosticQuestions: [] } }
       );
     }
     if (this.data) {
       this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !t.id.startsWith('flag_') && !t.subject.startsWith('[AUTO-FLAG'));
-      this.data.answerSubmissions = this.data.answerSubmissions.filter(s => s.worksheetId !== 'diagnostic' && s.worksheetId !== 'ws_demo_live_01' && !s.id.startsWith('sub_diag_'));
+      this.data.answerSubmissions = this.data.answerSubmissions.filter(s => s.worksheetId !== 'diagnostic' && !s.id.startsWith('sub_diag_'));
       this.data.evaluationReports = this.data.evaluationReports.filter(r => r.worksheetId !== 'diagnostic' && !r.id.startsWith('rep_diag_'));
-      const demoStudentIds = [
-        'st_gps_01', 'st_gps_02', 'st_gps_03', 'st_gps_04', 'st_gps_05',
-        's_AP_GNT_GNT_01_01_C2_01', 's_AP_GNT_GNT_01_01_C2_02', 's_AP_GNT_GNT_01_01_C2_03', 's_AP_GNT_GNT_01_01_C2_04', 's_AP_GNT_GNT_01_01_C2_05'
-      ];
       if (this.data.students) {
         this.data.students.forEach(st => {
-          if (demoStudentIds.includes(st.id)) {
-            st.currentLevel = 0;
+          if ((st.assignedDiagnosticQuestions && st.assignedDiagnosticQuestions.length > 0) || st.currentLevel > 1) {
+            st.currentLevel = 1;
             st.currentSubLevel = undefined;
             st.assignedDiagnosticQuestions = [];
           }
         });
       }
+      if (!this.mongoDb) await this.save();
     }
   }
 
   async updateUser(userId: string, updates: Partial<User>) {
-    await this.mongoDb!.collection('users').updateOne({ id: userId }, { $set: updates });
-    const u = await this.mongoDb!.collection<User>('users').findOne({ id: userId });
-    if (u && this.data) {
-      const idx = this.data.users.findIndex(x => x.id === userId);
-      if (idx !== -1) this.data.users[idx] = u;
+    if (this.mongoDb) {
+      await this.mongoDb.collection('users').updateOne({ id: userId }, { $set: updates });
+      const u = await this.mongoDb.collection<User>('users').findOne({ id: userId });
+      if (u && this.data) {
+        const idx = this.data.users.findIndex(x => x.id === userId);
+        if (idx !== -1) this.data.users[idx] = u;
+      }
+      return u || undefined;
     }
-    return u || undefined;
+    if (this.data) {
+      const idx = this.data.users.findIndex(x => x.id === userId);
+      if (idx !== -1) {
+        this.data.users[idx] = { ...this.data.users[idx], ...updates };
+        await this.save();
+        return this.data.users[idx];
+      }
+    }
+    return undefined;
   }
 
   async updateSchool(schoolId: string, updates: Partial<School>) {
-    await this.mongoDb!.collection('schools').updateOne({ id: schoolId }, { $set: updates });
-    const s = await this.mongoDb!.collection<School>('schools').findOne({ id: schoolId });
-    if (s && this.data) {
-      const idx = this.data.schools.findIndex(x => x.id === schoolId);
-      if (idx !== -1) this.data.schools[idx] = s;
+    if (this.mongoDb) {
+      await this.mongoDb.collection('schools').updateOne({ id: schoolId }, { $set: updates });
+      const s = await this.mongoDb.collection<School>('schools').findOne({ id: schoolId });
+      if (s && this.data) {
+        const idx = this.data.schools.findIndex(x => x.id === schoolId);
+        if (idx !== -1) this.data.schools[idx] = s;
+      }
+      return s || undefined;
     }
-    return s || undefined;
+    if (this.data) {
+      const idx = this.data.schools.findIndex(x => x.id === schoolId);
+      if (idx !== -1) {
+        this.data.schools[idx] = { ...this.data.schools[idx], ...updates };
+        await this.save();
+        return this.data.schools[idx];
+      }
+    }
+    return undefined;
   }
 
   async addSchool(school: School) {
-    await this.mongoDb!.collection('schools').insertOne(school);
-    if (this.data) this.data.schools.push(school);
+    if (this.mongoDb) {
+      await this.mongoDb.collection('schools').insertOne(school);
+    }
+    if (this.data) {
+      this.data.schools.push(school);
+      if (!this.mongoDb) await this.save();
+    }
     return school;
   }
 

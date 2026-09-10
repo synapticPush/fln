@@ -1199,6 +1199,11 @@ export function registerEvaluationRoutes(app: express.Express) {
 
     await dbStore.addEvaluationReport(report);
 
+    // Trigger real-time pedagogical auto-flag scan in background
+    autoFlagService.checkAndFlagQuestions({ worksheetId: ws.id, minAttempts: 3, failureThreshold: 0.50, mediumFailureThreshold: 0.70 }).catch(err => {
+      console.warn('[autoflag] Evaluation auto-flag check error:', err);
+    });
+
     try {
       await assignStudentToArchetype(studentId);
     } catch (error) {
