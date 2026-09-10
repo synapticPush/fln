@@ -3,7 +3,7 @@ async function runLiveTest() {
 
   // 1. Superadmin Login
   console.log('\n1. Logging in as Superadmin...');
-  const loginRes = await fetch('http://localhost:5000/api/auth/login', {
+  const loginRes = await fetch('http://localhost:3000/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'superadmin@fln.org', password: 'Fln@2026' })
@@ -15,7 +15,7 @@ async function runLiveTest() {
 
   // 2. Fetch Initial Auto-Flag Summary
   console.log('\n2. Fetching Auto-Flag Quality Summary...');
-  const summaryRes = await fetch('http://localhost:5000/api/governance/auto-flag/summary', {
+  const summaryRes = await fetch('http://localhost:3000/api/governance/auto-flag/summary', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   const summaryData = await summaryRes.json();
@@ -29,7 +29,7 @@ async function runLiveTest() {
 
   // 3. Trigger Quality Audit Scan
   console.log('\n3. Triggering Pedagogical Anomaly Audit Scan (SRS Rule R-15)...');
-  const scanRes = await fetch('http://localhost:5000/api/governance/auto-flag/scan', {
+  const scanRes = await fetch('http://localhost:3000/api/governance/auto-flag/scan', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -46,7 +46,7 @@ async function runLiveTest() {
 
   // 4. Fetch All Tickets in Review Queue
   console.log('\n4. Inspecting Review Queue & Flag Details...');
-  const ticketsRes = await fetch('http://localhost:5000/api/tickets', {
+  const ticketsRes = await fetch('http://localhost:3000/api/tickets', {
     headers: { 'Authorization': `Bearer ${token}` }
   });
   const tickets = await ticketsRes.json();
@@ -66,7 +66,7 @@ async function runLiveTest() {
 
     // 5. Test Executing Superadmin Action (Resolve / Reclassify)
     console.log('\n5. Executing Superadmin Action on Flag...');
-    const resolveRes = await fetch(`http://localhost:5000/api/tickets/${sample.id}/resolve`, {
+    const resolveRes = await fetch(`http://localhost:3000/api/tickets/${sample.id}/resolve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -90,20 +90,20 @@ async function runLiveTest() {
 
   // 6. Test Teacher Role Scoping & Student Diagnostic Reset
   console.log('\n6. Testing Teacher Scope & Diagnostic Reset...');
-  const teacherLogin = await fetch('http://localhost:5000/api/auth/login', {
+  const teacherLogin = await fetch('http://localhost:3000/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'gps-mt-001.t01@fln.org', password: 'dev-password-bypass' })
+    body: JSON.stringify({ email: 'gps-mt-001.t01@fln.org', password: 'Fln@2026' })
   });
   const teacherToken = (await teacherLogin.json()).token;
 
-  const studentsRes = await fetch('http://localhost:5000/api/students', {
+  const studentsRes = await fetch('http://localhost:3000/api/students', {
     headers: { 'Authorization': `Bearer ${teacherToken}` }
   });
   const students = await studentsRes.json();
   if (students.length > 0) {
     const student = students[0];
-    const resetRes = await fetch(`http://localhost:5000/api/students/${student.id}/reset-diagnostic`, {
+    const resetRes = await fetch(`http://localhost:3000/api/students/${student.id}/reset-diagnostic`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${teacherToken}` }
     });
