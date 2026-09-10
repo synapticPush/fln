@@ -2142,14 +2142,22 @@ export class DBStore {
   }
 
   async addWorksheet(ws: Worksheet) {
-    await this.mongoDb!.collection('worksheets').insertOne(ws);
-    if (this.data) this.data.worksheets.push(ws);
+    if (this.mongoDb) {
+      await this.mongoDb.collection('worksheets').insertOne(ws);
+    }
+    if (this.data) {
+      this.data.worksheets.push(ws);
+      if (!this.mongoDb) await this.save();
+    }
     return ws;
   }
 
   async addStudentCycleLock(lock: StudentCycleLock) {
     if (this.mongoDb) await this.mongoDb.collection('studentCycleLocks').insertOne(lock as any);
-    if (this.data) this.data.studentCycleLocks.push(lock);
+    if (this.data) {
+      this.data.studentCycleLocks.push(lock);
+      if (!this.mongoDb) await this.save();
+    }
     return lock;
   }
 
@@ -2157,35 +2165,64 @@ export class DBStore {
     if (this.mongoDb) {
       await this.mongoDb.collection('testHistory').insertOne(entry);
     }
-    if (this.data) this.data.testHistory.push(entry);
+    if (this.data) {
+      this.data.testHistory.push(entry);
+      if (!this.mongoDb) await this.save();
+    }
     return entry;
   }
 
   async updateWorksheet(worksheetId: string, updates: Partial<Worksheet>) {
-    await this.mongoDb!.collection('worksheets').updateOne({ id: worksheetId }, { $set: updates });
-    const ws = await this.mongoDb!.collection<Worksheet>('worksheets').findOne({ id: worksheetId });
-    if (ws && this.data) {
-      const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
-      if (idx !== -1) this.data.worksheets[idx] = ws;
+    if (this.mongoDb) {
+      await this.mongoDb.collection('worksheets').updateOne({ id: worksheetId }, { $set: updates });
+      const ws = await this.mongoDb.collection<Worksheet>('worksheets').findOne({ id: worksheetId });
+      if (ws && this.data) {
+        const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
+        if (idx !== -1) this.data.worksheets[idx] = ws;
+      }
+      return ws || undefined;
     }
-    return ws || undefined;
+    if (this.data) {
+      const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
+      if (idx !== -1) {
+        this.data.worksheets[idx] = { ...this.data.worksheets[idx], ...updates };
+        await this.save();
+        return this.data.worksheets[idx];
+      }
+    }
+    return undefined;
   }
 
   async addLevelWorksheet(ws: LevelWorksheet) {
-    await this.mongoDb!.collection('levelWorksheets').insertOne(ws);
-    if (this.data) this.data.levelWorksheets.push(ws);
+    if (this.mongoDb) {
+      await this.mongoDb.collection('levelWorksheets').insertOne(ws);
+    }
+    if (this.data) {
+      this.data.levelWorksheets.push(ws);
+      if (!this.mongoDb) await this.save();
+    }
     return ws;
   }
 
   async addAnswerSubmission(sub: AnswerSubmission) {
-    await this.mongoDb!.collection('answerSubmissions').insertOne(sub);
-    if (this.data) this.data.answerSubmissions.push(sub);
+    if (this.mongoDb) {
+      await this.mongoDb.collection('answerSubmissions').insertOne(sub);
+    }
+    if (this.data) {
+      this.data.answerSubmissions.push(sub);
+      if (!this.mongoDb) await this.save();
+    }
     return sub;
   }
 
   async addEvaluationReport(rep: EvaluationReport) {
-    await this.mongoDb!.collection('evaluationReports').insertOne(rep);
-    if (this.data) this.data.evaluationReports.push(rep);
+    if (this.mongoDb) {
+      await this.mongoDb.collection('evaluationReports').insertOne(rep);
+    }
+    if (this.data) {
+      this.data.evaluationReports.push(rep);
+      if (!this.mongoDb) await this.save();
+    }
     return rep;
   }
 
