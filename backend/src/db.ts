@@ -1950,13 +1950,8 @@ export class DBStore {
   }
 
   async getTickets() {
-    const seedTickets = (this.data?.tickets && this.data.tickets.length > 0) ? this.data.tickets : this.getSeedData().tickets;
-    if (this.mongoDb) {
-      const list = await this.mongoDb.collection<Ticket>('tickets').find({}).toArray();
-      if (list && list.length > 0) return list;
-      return seedTickets;
-    }
-    return seedTickets;
+    if (this.mongoDb) return await this.mongoDb.collection<Ticket>('tickets').find({}).toArray();
+    return this.data?.tickets || [];
   }
   async getLogbook() {
     if (this.mongoDb) return await this.mongoDb.collection<LogEntry>('logbook').find({}).toArray();
@@ -2372,25 +2367,16 @@ export class DBStore {
 
   async resetAutoFlagState() {
     if (this.mongoDb) {
-      // Clear all auto-flag tickets and test-generated tickets
-      await this.mongoDb.collection('tickets').deleteMany({
-        $or: [
-          { isAutoFlag: true },
-          { id: { $regex: '^flag_' } },
-          { id: { $regex: '^tkt_' } },
-          { subject: { $regex: '^\\[AUTO-FLAG' } }
-        ]
-      });
+      // Clear all tickets
+      await this.mongoDb.collection('tickets').deleteMany({});
       // Clear question difficulty overrides
       await this.mongoDb.collection('questionDifficultyOverrides').deleteMany({});
-      // Clear diagnostic submissions
-      await this.mongoDb.collection('answerSubmissions').deleteMany({
-        $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^sub_diag_' } }]
-      });
-      // Clear diagnostic evaluation reports
-      await this.mongoDb.collection('evaluationReports').deleteMany({
-        $or: [{ worksheetId: 'diagnostic' }, { id: { $regex: '^rep_diag_' } }]
-      });
+      // Clear answer submissions
+      await this.mongoDb.collection('answerSubmissions').deleteMany({});
+      // Clear evaluation reports
+      await this.mongoDb.collection('evaluationReports').deleteMany({});
+      // Clear student cycle locks
+      await this.mongoDb.collection('studentCycleLocks').deleteMany({});
       // Reset diagnostic state on students
       await this.mongoDb.collection('students').updateMany(
         { $or: [{ assignedDiagnosticQuestions: { $exists: true, $ne: [] } }, { currentLevel: { $gt: 1 } }] },
@@ -2398,16 +2384,11 @@ export class DBStore {
       );
     }
     if (this.data) {
-      this.data.tickets = this.data.tickets.filter(
-        t => !t.isAutoFlag && !t.id.startsWith('flag_') && !t.id.startsWith('tkt_') && !t.subject.startsWith('[AUTO-FLAG')
-      );
+      this.data.tickets = [];
       (this.data as any).questionDifficultyOverrides = {};
-      this.data.answerSubmissions = this.data.answerSubmissions.filter(
-        s => s.worksheetId !== 'diagnostic' && !s.id.startsWith('sub_diag_')
-      );
-      this.data.evaluationReports = this.data.evaluationReports.filter(
-        r => r.worksheetId !== 'diagnostic' && !r.id.startsWith('rep_diag_')
-      );
+      this.data.answerSubmissions = [];
+      this.data.evaluationReports = [];
+      this.data.studentCycleLocks = [];
       if (this.data.students) {
         this.data.students.forEach(st => {
           if ((st.assignedDiagnosticQuestions && st.assignedDiagnosticQuestions.length > 0) || st.currentLevel > 1) {

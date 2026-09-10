@@ -53,16 +53,28 @@ async function main() {
     headers: { 'Authorization': `Bearer ${saToken}` }
   });
   const tickets = await ticketsRes.json();
-  const autoFlags = tickets.filter(t => t.isAutoFlag || (t.subject && t.subject.startsWith('[AUTO-FLAG')));
-  const testTickets = tickets.filter(t => t.id && t.id.startsWith('tkt_'));
-  console.log(`  Total regular baseline tickets remaining: ${tickets.length}`);
-  console.log(`  Auto-flags in ticket queue: ${autoFlags.length} (Expected 0)`);
-  console.log(`  Temporary test tickets in ticket queue: ${testTickets.length} (Expected 0)`);
-  assert.equal(autoFlags.length, 0, 'There should be 0 auto-flags');
-  assert.equal(testTickets.length, 0, 'There should be 0 test-generated tickets');
+  console.log(`  Superadmin total tickets in Review Queue: ${tickets.length} (Expected 0)`);
+  assert.equal(tickets.length, 0, 'Review queue must start completely clean (0 tickets)');
 
-  // 5. Verify Teacher Classroom Dashboard State
+  // 5. Test Audit Quality Scan on Clean State
+  console.log('\n🔍 Testing "Run Quality Audit Scan" on Clean State:');
+  const scanRes = await fetch(`${API_BASE}/governance/auto-flag/scan`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${saToken}` }
+  });
+  const scanData = await scanRes.json();
+  console.log(`  Audit Scan Result: createdCount=${scanData.createdCount}, updatedCount=${scanData.updatedCount}`);
+  assert.equal(scanData.createdCount, 0, 'Audit scan on clean DB must create 0 flags');
+
+  // 6. Verify Teacher Dashboard State
   console.log('\n🔍 Verifying Teacher Dashboard State:');
+  const teacherTicketsRes = await fetch(`${API_BASE}/tickets`, {
+    headers: { 'Authorization': `Bearer ${teacherToken}` }
+  });
+  const teacherTickets = await teacherTicketsRes.json();
+  console.log(`  Teacher tickets in Feedback tab: ${teacherTickets.length} (Expected 0)`);
+  assert.equal(teacherTickets.length, 0, 'Teacher tickets must start completely clean (0 tickets)');
+
   const studentsRes = await fetch(`${API_BASE}/students?limit=100`, {
     headers: { 'Authorization': `Bearer ${teacherToken}` }
   });
@@ -75,10 +87,12 @@ async function main() {
     headers: { 'Authorization': `Bearer ${teacherToken}` }
   });
   const classes = await classesRes.json();
-  console.log(`  Active Classes loaded: ${classes.length} (${classes.map(c => c.name).join(', ')})`);
+  console.log(`  Active Classes loaded: ${classes.length}`);
   assert.ok(classes.length >= 3, 'Teacher classroom must have classes (Class 2, 3, 4)');
 
   console.log('\n===============================================================');
+  console.log('✅ DATABASE RESET COMPLETE: 100% CLEAN BASELINE READY FOR TESTING!');
+  console.log('===============================================================');
   console.log('✅ DATABASE RESET COMPLETE: CLEAN DASHBOARDS READY FOR TESTING!');
   console.log('===============================================================');
 }
