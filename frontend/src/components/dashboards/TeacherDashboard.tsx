@@ -10,6 +10,7 @@ import { BaselineUpload } from '../BaselineUpload';
 import { SkillGraphPanel } from '../SkillGraphPanel';
 import { Table, Column } from '../Table';
 import { LevelBadge } from '../RoleDashboards';
+import { TicketSubmission } from '../TicketSubmission';
 import { ClassSummaryBar } from './ClassSummaryBar';
 
 
@@ -219,6 +220,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, token,
           Top Performing Students, now that the standalone Performance page
           is gone. */}
       <ClassSummaryBar students={students} token={token} teacherId={user.id} />
+
+      <TicketSubmission token={token} userRole={user.role} />
 
       {/* Class picker tabs */}
       <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-700 pb-px">
