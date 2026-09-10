@@ -1293,8 +1293,16 @@ export class DBStore {
     return this.data?.schools || [];
   }
   async getClasses() {
-    if (this.mongoDb) return await this.mongoDb.collection<ClassGroup>('classes').find({}).toArray();
-    return this.data?.classes || [];
+    const seedClasses = (this.data?.classes && this.data.classes.length > 0) ? this.data.classes : this.getSeedData().classes;
+    if (this.mongoDb) {
+      const cls = await this.mongoDb.collection<ClassGroup>('classes').find({}).toArray();
+      if (cls && cls.length > 0) {
+        const existingSchoolIds = new Set(cls.map(c => c.schoolId));
+        const missingSeedClasses = seedClasses.filter(sc => !existingSchoolIds.has(sc.schoolId));
+        return [...cls, ...missingSeedClasses];
+      }
+    }
+    return seedClasses;
   }
   async getStudents(opts?: { limit?: number; offset?: number; schoolId?: string | string[]; teacherId?: string; sort?: 'latest'; q?: string }) {
     // Search must run BEFORE limit/offset. A previous version of this
@@ -1307,6 +1315,7 @@ export class DBStore {
     // here means the same query Mongo/JS does is also the one that
     // pagination slices.
     const search = (opts?.q || '').trim().toLowerCase();
+    const fallbackStudents = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
     if (this.mongoDb) {
       const filter: any = {};
       if (opts?.schoolId) {
@@ -1322,21 +1331,13 @@ export class DBStore {
         // advertises. The previous version used an unanchored case-insensitive
         // regex (e.g. /foo/i), which CANNOT use a B-tree index in this
         // MongoDB version — every keystroke COLLSCAN'd the 86k-row
-        // collection. The fix is a BSON range { $gte: prefix, $lt: prefix+'￿' }
+        // collection. The fix is a BSON range { $gte: prefix, $lt: prefix+'' }
         // combined with a strength:2 collation on the cursor. Combined with
         // the matching collation-aware indexes (see the `init()` block
         // above), Mongo uses index OR (one IXSCAN per $or branch) and the
         // search runs in single-digit ms.
-        //
-        // The semantic change is "prefix" instead of "substring" — typing
-        // "kar" still finds "Kartik", but typing "artik" no longer matches
-        // "Kartik" via a mid-string substring. This is the smallest
-        // architecturally correct change that preserves the user-typed
-        // search box; the API contract (the ?q= parameter) is unchanged.
-        // The in-memory (file-fallback) path below mirrors this with
-        // .startsWith() so dev and prod return the same results.
         const prefix = search;
-        const upper = prefix + '￿';
+        const upper = prefix + '';
         filter.$or = [
           { name:        { $gte: prefix, $lt: upper } },
           { displayId:   { $gte: prefix, $lt: upper } },
@@ -1349,39 +1350,29 @@ export class DBStore {
       const skip = opts?.offset || 0;
       const limit = opts?.limit || 0;
       const cursor = this.mongoDb.collection<Student>('students').find(filter);
-      // When the query has a search, use the same collation as the
-      // `*_ci` indexes above. Without this, Mongo falls back to the
-      // simple-binary collation, the index OR is unusable, and we
-      // COLLSCAN the whole collection. With it, index OR turns 6
-      // COLLSCANs into 6 IXSCANs (~1ms each on 86k rows).
       if (search) cursor.collation({ locale: 'en', strength: 2 });
-      // `sort: 'latest'` returns most-recently-inserted first. In Mongo
-      // the natural `_id` ObjectId is time-prefixed, so a descending
-      // sort gives the same intent as "newest at the top" in the
-      // file-fallback store (where students are `push`ed to the array
-      // and we reverse the result). Other sort modes are intentionally
-      // not exposed — the route layer is the only place that names
-      // sort orders.
       if (opts?.sort === 'latest') cursor.sort({ _id: -1 });
       if (skip) cursor.skip(skip);
       if (limit) cursor.limit(limit);
-      return await cursor.toArray();
+      const mongoResults = await cursor.toArray();
+      if (mongoResults.length > 0 || !opts?.schoolId) {
+        return mongoResults;
+      }
+      // If Mongo Atlas returns 0 students for this specific seed schoolId (e.g. gps-mt-001),
+      // fall back to seed students so the demo classroom workspace is fully populated.
+      const wanted = Array.isArray(opts.schoolId) ? opts.schoolId : [opts.schoolId];
+      let seedFiltered = fallbackStudents.filter(s => wanted.includes(s.schoolId));
+      if (opts?.teacherId) seedFiltered = seedFiltered.filter(s => s.teacherId === opts.teacherId);
+      if (opts?.limit) seedFiltered = seedFiltered.slice(0, opts.limit);
+      return seedFiltered;
     }
-    let result = this.data?.students || [];
+    let result = fallbackStudents;
     if (opts?.schoolId) {
       const wanted = Array.isArray(opts.schoolId) ? opts.schoolId : [opts.schoolId];
       result = result.filter(s => wanted.includes(s.schoolId));
     }
     if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
     if (search) {
-      // Same six fields, same case-insensitive PREFIX semantics as the
-      // Mongo $or above (see comment in the Mongo branch). The previous
-      // version used `.includes()` (substring); the new Mongo path is
-      // BSON range + collation, which is prefix-only. We mirror that
-      // here with `.startsWith()` so dev (file-fallback) and prod
-      // (Mongo) return the same rows for the same `q` — otherwise a
-      // dev who types "artik" sees "Kartik" in their file-fallback
-      // results but a prod deploy would not, and vice versa.
       result = result.filter(s => {
         const fields = [
           s.name, s.displayId, s.aadharMasked, s.schoolId, s.classGroup, s.section,
@@ -1392,10 +1383,6 @@ export class DBStore {
         return false;
       });
     }
-    // For the file-fallback store, students are appended to the array
-    // on insert, so the array is in chronological order. Reversing it
-    // gives "latest first" — matching the Mongo sort({ _id: -1 })
-    // path.
     if (opts?.sort === 'latest') result = [...result].reverse();
     if (opts?.offset) result = result.slice(opts.offset);
     if (opts?.limit) result = result.slice(0, opts.limit);
@@ -1410,9 +1397,11 @@ export class DBStore {
    */
   async getStudentById(id: string): Promise<Student | null> {
     if (this.mongoDb) {
-      return await this.mongoDb.collection<Student>('students').findOne({ id });
+      const st = await this.mongoDb.collection<Student>('students').findOne({ id });
+      if (st) return st;
     }
-    return (this.data?.students || []).find(s => s.id === id) || null;
+    const seed = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
+    return seed.find(s => s.id === id) || null;
   }
   async countStudents(opts?: { schoolId?: string; teacherId?: string; q?: string }) {
     // Mirrors getStudents' search semantics so the route's X-Total-Count
