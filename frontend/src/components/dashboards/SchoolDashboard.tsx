@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { apiFetch } from '../../services/apiClient';
 import { ClassGroup, Student, DashboardProps } from '../../types';
 import { WorksheetWorkflow } from '../WorksheetWorkflow';
+import { TicketSubmission } from '../TicketSubmission';
 
 // ==========================================
 // 3. SCHOOL PRINCIPAL DASHBOARD
@@ -51,6 +52,8 @@ export const SchoolDashboard: React.FC<DashboardProps> = ({ user, token }) => {
         <h1 className="text-3xl font-display font-semibold text-zinc-900 dark:text-white tracking-tight">School Administration</h1>
         <p className="text-zinc-550 dark:text-zinc-400 text-sm mt-0.5">GPS Model Town Ludhiana (ID: {user.schoolId})</p>
       </div>
+
+      <TicketSubmission token={token} userRole={user.role} />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Classes grid */}
