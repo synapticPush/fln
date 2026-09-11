@@ -31,14 +31,23 @@ function isAnswerCorrect(submitted: any, expected: any): boolean {
   if (!sStr) return false;
   if (sStr === eStr) return true;
 
-  // Numeric equivalence (e.g. "05" == "5", "5.0" == "5")
-  const sNum = parseFloat(sStr);
-  const eNum = parseFloat(eStr);
-  if (!isNaN(sNum) && !isNaN(eNum) && sNum === eNum) {
-    return true;
+  // Strict numeric equivalence (e.g. "05" == "5", "5.0" == "5"), rejecting partial string prefixes like "5abc"
+  const isStrictNum = (s: string) => /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(s);
+  if (isStrictNum(sStr) && isStrictNum(eStr)) {
+    const sNum = Number(sStr);
+    const eNum = Number(eStr);
+    if (!isNaN(sNum) && !isNaN(eNum) && sNum === eNum) {
+      return true;
+    }
   }
 
   return false;
+}
+
+function getCanonicalQuestionKey(qId: string): string {
+  if (!qId) return qId;
+  const match = qId.match(/^(?:st_[a-zA-Z0-9_-]+|s\d+)_(q\d+|[A-Z0-9_-]+)$/i);
+  return match ? match[1] : qId;
 }
 
 export class AutoFlagService {
@@ -72,7 +81,7 @@ export class AutoFlagService {
 
       for (const q of ws.questions) {
         if (!q.question_id) continue;
-        const qKey = q.question_id;
+        const qKey = getCanonicalQuestionKey(q.question_id);
         if (!statsMap.has(qKey)) {
           statsMap.set(qKey, {
             question: q,
@@ -95,11 +104,13 @@ export class AutoFlagService {
       const wsQuestions = matchingWs?.questions || [];
 
       for (const [qId, submittedAnswer] of Object.entries(sub.answers)) {
-        let entry = statsMap.get(qId);
+        const canonicalKey = getCanonicalQuestionKey(qId);
+        let entry = statsMap.get(canonicalKey) || statsMap.get(qId);
 
         // If question wasn't indexed from worksheet, check if question object exists in matchingWs or sub.questions
         if (!entry) {
-          const qObj = wsQuestions.find(q => q.question_id === qId) || (sub.questions && sub.questions.find((q: Question) => q.question_id === qId));
+          const qObj = wsQuestions.find(q => q.question_id === qId || getCanonicalQuestionKey(q.question_id) === canonicalKey) ||
+            (sub.questions && sub.questions.find((q: Question) => q.question_id === qId || getCanonicalQuestionKey(q.question_id) === canonicalKey));
           if (qObj) {
             entry = {
               question: qObj,
@@ -108,7 +119,7 @@ export class AutoFlagService {
               schools: new Set<string>(),
               worksheetIds: new Set<string>()
             };
-            statsMap.set(qId, entry);
+            statsMap.set(canonicalKey, entry);
           }
         }
 
@@ -117,7 +128,11 @@ export class AutoFlagService {
           if (sub.schoolId) entry.schools.add(sub.schoolId);
           if (sub.worksheetId) entry.worksheetIds.add(sub.worksheetId);
 
-          const isCorrect = isAnswerCorrect(submittedAnswer, entry.question.answer);
+          // Find specific variant answer if question is personalized
+          const variantQ = wsQuestions.find(q => q.question_id === qId);
+          const expectedAnswer = variantQ ? variantQ.answer : entry.question.answer;
+
+          const isCorrect = isAnswerCorrect(submittedAnswer, expectedAnswer);
           if (!isCorrect) {
             entry.failures += 1;
           }

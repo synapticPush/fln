@@ -688,6 +688,7 @@ export function registerStudentRoutes(app: express.Express) {
       currentLevel: 1,
       currentSubLevel: 0,
       targetLevel: 2,
+      assignedDiagnosticQuestions: [],
       levelHistory: []
     });
 

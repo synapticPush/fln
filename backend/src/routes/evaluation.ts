@@ -1308,11 +1308,6 @@ export function registerEvaluationRoutes(app: express.Express) {
       });
     }
 
-    // Trigger Automated Pedagogical Quality Audit (SRS Rule R-15) asynchronously
-    autoFlagService.checkAndFlagQuestions({ worksheetId }).catch(err => {
-      console.warn('Background auto-flag evaluation check warning:', err);
-    });
-
     res.json({ submission, report, evaluation });
   });
 

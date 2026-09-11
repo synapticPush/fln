@@ -226,7 +226,7 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
    * Derives the explicit Action Taken label, badge colors, and category
    */
   const getActionMetadata = (t: Ticket) => {
-    const diff = (t.flagDetails?.difficulty || 'easy').toUpperCase();
+    const origDiff = (t.flagDetails?.originalDifficulty || (t.reclassifiedBand === 'medium' ? 'Easy' : (t.reclassifiedBand === 'hard' ? 'Medium' : t.flagDetails?.difficulty || 'easy'))).toUpperCase();
     const isResolved = t.status === 'Resolved';
     const isReviewed = t.status === 'Reviewed';
 
@@ -257,7 +257,7 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
       return {
         hasAction: true,
         actionLabel: 'ACTION: RECLASSIFIED TO MEDIUM',
-        actionTitle: `Reclassified from ${diff} to Medium`,
+        actionTitle: `Reclassified from ${origDiff} to Medium`,
         badgeBg: 'bg-violet-100 text-violet-900 dark:bg-violet-950/80 dark:text-violet-200 border-violet-300 dark:border-violet-800',
         pillBg: 'bg-violet-600 text-white',
         description: `Question difficulty successfully elevated to Medium in the active curriculum pool.`
@@ -268,7 +268,7 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
       return {
         hasAction: true,
         actionLabel: 'ACTION: RECLASSIFIED TO HARD',
-        actionTitle: `Reclassified from ${diff} to Hard`,
+        actionTitle: `Reclassified from ${origDiff} to Hard`,
         badgeBg: 'bg-rose-100 text-rose-900 dark:bg-rose-950/80 dark:text-rose-200 border-rose-300 dark:border-rose-800',
         pillBg: 'bg-rose-600 text-white',
         description: `Question difficulty reclassified to Hard due to severe student failure rate (≥85%).`
@@ -618,8 +618,17 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
                   >
                     {/* Header Row (Always visible, displays action taken prominently) */}
                     <div
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={isExpanded}
                       onClick={() => toggleExpand(t.id)}
-                      className="p-4 cursor-pointer hover:bg-zinc-50/70 dark:hover:bg-slate-800/40 transition flex items-start justify-between gap-3 select-none"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleExpand(t.id);
+                        }
+                      }}
+                      className="p-4 cursor-pointer hover:bg-zinc-50/70 dark:hover:bg-slate-800/40 transition flex items-start justify-between gap-3 select-none focus:outline-none focus:ring-2 focus:ring-amber-500/50 rounded-t-xl"
                     >
                       <div className="space-y-1.5 flex-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">

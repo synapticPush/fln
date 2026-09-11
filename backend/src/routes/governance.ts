@@ -8,11 +8,24 @@ export function registerGovernanceRoutes(app: express.Express) {
   app.post('/api/governance/auto-flag/scan', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (user.role !== 'superadmin' && user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Superadmin or Admin role required' });
+    }
 
     try {
-      const minAttempts = req.body?.minAttempts !== undefined ? parseInt(req.body.minAttempts, 10) : 3;
-      const failureThreshold = req.body?.failureThreshold !== undefined ? parseFloat(req.body.failureThreshold) : 0.50;
-      const mediumFailureThreshold = req.body?.mediumFailureThreshold !== undefined ? parseFloat(req.body.mediumFailureThreshold) : 0.70;
+      const rawMinAttempts = parseInt(req.body?.minAttempts, 10);
+      const minAttempts = !isNaN(rawMinAttempts) && rawMinAttempts >= 1 ? Math.min(rawMinAttempts, 100) : 3;
+
+      const rawFailureThreshold = parseFloat(req.body?.failureThreshold);
+      const failureThreshold = !isNaN(rawFailureThreshold) && rawFailureThreshold > 0 && rawFailureThreshold < 1
+        ? Math.max(0.1, Math.min(0.9, rawFailureThreshold))
+        : 0.50;
+
+      const rawMedThreshold = parseFloat(req.body?.mediumFailureThreshold);
+      const mediumFailureThreshold = !isNaN(rawMedThreshold) && rawMedThreshold > 0 && rawMedThreshold < 1
+        ? Math.max(0.2, Math.min(0.95, rawMedThreshold))
+        : 0.70;
+
       const worksheetId = req.body?.worksheetId;
 
       const scanResult = await autoFlagService.checkAndFlagQuestions({
@@ -40,6 +53,9 @@ export function registerGovernanceRoutes(app: express.Express) {
   app.get('/api/governance/auto-flag/summary', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (user.role !== 'superadmin' && user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Superadmin or Admin role required' });
+    }
 
     try {
       const summary = await autoFlagService.getAutoFlagSummary();
@@ -53,6 +69,9 @@ export function registerGovernanceRoutes(app: express.Express) {
   app.post('/api/governance/auto-flag/reset', async (req, res) => {
     const user = getAuthUser(req);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
+    if (user.role !== 'superadmin' && user.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Superadmin or Admin role required' });
+    }
 
     try {
       await dbStore.resetAutoFlagState();

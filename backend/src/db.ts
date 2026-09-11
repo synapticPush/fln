@@ -1349,7 +1349,7 @@ export class DBStore {
         // above), Mongo uses index OR (one IXSCAN per $or branch) and the
         // search runs in single-digit ms.
         const prefix = search;
-        const upper = prefix + '';
+        const upper = prefix + '\uffff';
         filter.$or = [
           { name:        { $gte: prefix, $lt: upper } },
           { displayId:   { $gte: prefix, $lt: upper } },
@@ -2368,8 +2368,10 @@ export class DBStore {
 
   async resetAutoFlagState() {
     if (this.mongoDb) {
-      // Clear all tickets
-      await this.mongoDb.collection('tickets').deleteMany({});
+      // Clear auto-flag and test tickets
+      await this.mongoDb.collection('tickets').deleteMany({
+        $or: [{ isAutoFlag: true }, { subject: { $regex: /^\[AUTO-FLAG/i } }]
+      });
       // Clear question difficulty overrides
       await this.mongoDb.collection('questionDifficultyOverrides').deleteMany({});
       // Clear answer submissions
@@ -2385,7 +2387,9 @@ export class DBStore {
       );
     }
     if (this.data) {
-      this.data.tickets = [];
+      if (this.data.tickets) {
+        this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !(t.subject && t.subject.startsWith('[AUTO-FLAG')));
+      }
       (this.data as any).questionDifficultyOverrides = {};
       this.data.answerSubmissions = [];
       this.data.evaluationReports = [];

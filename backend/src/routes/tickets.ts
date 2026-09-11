@@ -66,8 +66,9 @@ export function registerTicketRoutes(app: express.Express) {
       return res.status(403).json({ error: 'Forbidden. Superadmin only.' });
     }
     const { status, resolutionNote, reclassifiedBand, actionTaken } = req.body; // Reviewed or Resolved
+    const validStatus = ['Reviewed', 'Resolved'].includes(status) ? status : 'Resolved';
     const updates: Partial<Ticket> = {
-      status,
+      status: validStatus,
       actionTakenAt: new Date().toISOString(),
       actionTakenBy: user.email
     };
