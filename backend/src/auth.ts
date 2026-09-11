@@ -19,22 +19,15 @@ export function getAuthUser(req: express.Request): User | null {
   const token = authHeader.replace('Bearer ', '').trim();
   if (!token) return null;
 
-  let payload: { email?: string; schoolId?: string; role?: string; sub?: string };
+  let payload: { email?: string };
   try {
-    payload = jwt.verify(token, JWT_SECRET) as any;
+    payload = jwt.verify(token, JWT_SECRET) as { email?: string };
   } catch {
     return null; // invalid signature or expired token
   }
   if (!payload?.email) return null;
 
-  const user = dbStore.getUserSync(payload.email);
-  if (user) {
-    if (!user.schoolId && payload.schoolId) {
-      user.schoolId = payload.schoolId;
-    }
-    return user;
-  }
-  return null;
+  return dbStore.getUserSync(payload.email);
 }
 
 // Authorization check for by-ID student endpoints (PATCH/diagnostic/diagnostic-submit).
