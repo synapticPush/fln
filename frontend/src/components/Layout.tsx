@@ -208,6 +208,7 @@ export const Layout: React.FC<LayoutProps> = ({
         break;
 
       case UserRole.SUPERADMIN:
+        list.push({ name: 'Review Queue & Tickets', view: 'tickets', icon: ShieldAlert });
         list.push({ name: 'Users', view: 'users', icon: Users });
         list.push({ name: 'Schools', view: 'schools', icon: School });
         list.push({ name: 'Worksheet Templates', view: 'worksheet_templates', icon: ClipboardList });
@@ -219,6 +220,10 @@ export const Layout: React.FC<LayoutProps> = ({
         list.push({ name: 'Audit Logs', view: 'logbook', icon: ShieldCheck });
         list.push({ name: 'Certification Reviews', view: 'certification_reviews', icon: Award });
         break;
+    }
+
+    if (currentUser.role !== UserRole.SUPERADMIN) {
+      list.push({ name: 'Tickets & Feedback', view: 'tickets', icon: HelpCircle });
     }
 
     list.push({ name: 'Notifications', view: 'notifications', icon: Bell, badge: notifications.length > 0 ? String(notifications.length) : undefined });
