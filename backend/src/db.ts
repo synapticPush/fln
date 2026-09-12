@@ -2292,10 +2292,6 @@ export class DBStore {
         { 'questions.question_id': questionId },
         { $set: { 'questions.$.difficulty': difficulty } }
       );
-      await this.mongoDb.collection('levelWorksheets').updateMany(
-        { 'questions.question_id': questionId },
-        { $set: { 'questions.$.difficulty': difficulty } }
-      );
     }
     if (this.data) {
       if (!(this.data as any).questionDifficultyOverrides) (this.data as any).questionDifficultyOverrides = [];
@@ -2308,15 +2304,6 @@ export class DBStore {
         for (const ws of this.data.worksheets) {
           if (ws.questions) {
             for (const q of ws.questions) {
-              if (q.question_id === questionId) q.difficulty = difficulty;
-            }
-          }
-        }
-      }
-      if (this.data.levelWorksheets) {
-        for (const lws of this.data.levelWorksheets) {
-          if (lws.questions) {
-            for (const q of lws.questions) {
               if (q.question_id === questionId) q.difficulty = difficulty;
             }
           }
