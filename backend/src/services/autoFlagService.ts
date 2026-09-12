@@ -70,6 +70,7 @@ export class AutoFlagService {
       failures: number;
       schools: Set<string>;
       worksheetIds: Set<string>;
+      studentOutcomes: Map<string, boolean>; // studentId/name -> isCorrect
     }
 
     const statsMap = new Map<string, QuestionStats>();
@@ -88,7 +89,8 @@ export class AutoFlagService {
             attempts: 0,
             failures: 0,
             schools: new Set<string>(),
-            worksheetIds: new Set<string>()
+            worksheetIds: new Set<string>(),
+            studentOutcomes: new Map<string, boolean>()
           });
         }
       }
@@ -117,14 +119,14 @@ export class AutoFlagService {
               attempts: 0,
               failures: 0,
               schools: new Set<string>(),
-              worksheetIds: new Set<string>()
+              worksheetIds: new Set<string>(),
+              studentOutcomes: new Map<string, boolean>()
             };
             statsMap.set(canonicalKey, entry);
           }
         }
 
         if (entry) {
-          entry.attempts += 1;
           if (sub.schoolId) entry.schools.add(sub.schoolId);
           if (sub.worksheetId) entry.worksheetIds.add(sub.worksheetId);
 
@@ -133,10 +135,26 @@ export class AutoFlagService {
           const expectedAnswer = variantQ ? variantQ.answer : entry.question.answer;
 
           const isCorrect = isAnswerCorrect(submittedAnswer, expectedAnswer);
-          if (!isCorrect) {
-            entry.failures += 1;
+          const studentIdentifier = sub.studentId || sub.studentName || `${sub.schoolId || 'sch'}_${sub.id}`;
+          
+          // Deduplicate per distinct student (if student previously passed, preserve pass)
+          const previousOutcome = entry.studentOutcomes.get(studentIdentifier);
+          if (previousOutcome !== true) {
+            entry.studentOutcomes.set(studentIdentifier, isCorrect);
           }
         }
+      }
+    }
+
+    // Compute distinct student counts for cohort failure metrics
+    for (const entry of statsMap.values()) {
+      if (entry.studentOutcomes.size > 0) {
+        entry.attempts = entry.studentOutcomes.size;
+        let failCount = 0;
+        for (const isCorrect of entry.studentOutcomes.values()) {
+          if (!isCorrect) failCount++;
+        }
+        entry.failures = failCount;
       }
     }
 

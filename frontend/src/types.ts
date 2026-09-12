@@ -265,6 +265,7 @@ export interface AutoFlagDetails {
   questionId: string;
   questionText: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  originalDifficulty?: 'easy' | 'medium' | 'hard';
   level: number;
   conceptId?: string;
   topic?: string;

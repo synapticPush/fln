@@ -226,6 +226,7 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
    * Derives the explicit Action Taken label, badge colors, and category
    */
   const getActionMetadata = (t: Ticket) => {
+    const diff = (t.flagDetails?.difficulty || 'easy').toUpperCase();
     const origDiff = (t.flagDetails?.originalDifficulty || (t.reclassifiedBand === 'medium' ? 'Easy' : (t.reclassifiedBand === 'hard' ? 'Medium' : t.flagDetails?.difficulty || 'easy'))).toUpperCase();
     const isResolved = t.status === 'Resolved';
     const isReviewed = t.status === 'Reviewed';
@@ -314,12 +315,13 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
     const isAuto = t.isAutoFlag || t.subject.startsWith('[AUTO-FLAG');
     const diff = (t.flagDetails?.difficulty || '').toLowerCase();
     const isResolved = t.status === 'Resolved';
+    const isReviewed = t.status === 'Reviewed';
 
     if (activeTab === 'autoflag') return isAuto;
     if (activeTab === 'easy') return isAuto && diff === 'easy';
     if (activeTab === 'medium') return isAuto && diff === 'medium';
-    if (activeTab === 'actions_taken') return isResolved;
-    if (activeTab === 'pending') return !isResolved;
+    if (activeTab === 'actions_taken') return isResolved || isReviewed;
+    if (activeTab === 'pending') return !isResolved && !isReviewed;
     if (activeTab === 'curriculum') return t.type === 'curriculum' && !isAuto;
     if (activeTab === 'general') return t.type === 'general';
     return true;
@@ -328,8 +330,8 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
   const autoFlagCount = tickets.filter(t => t.isAutoFlag || t.subject.startsWith('[AUTO-FLAG')).length;
   const easyFlagCount = tickets.filter(t => (t.isAutoFlag || t.subject.startsWith('[AUTO-FLAG')) && (t.flagDetails?.difficulty || '').toLowerCase() === 'easy').length;
   const mediumFlagCount = tickets.filter(t => (t.isAutoFlag || t.subject.startsWith('[AUTO-FLAG')) && (t.flagDetails?.difficulty || '').toLowerCase() === 'medium').length;
-  const actionsTakenCount = tickets.filter(t => t.status === 'Resolved').length;
-  const pendingCount = tickets.filter(t => t.status !== 'Resolved').length;
+  const actionsTakenCount = tickets.filter(t => t.status === 'Resolved' || t.status === 'Reviewed').length;
+  const pendingCount = tickets.filter(t => t.status !== 'Resolved' && t.status !== 'Reviewed').length;
 
   return (
     <div className="space-y-6" id="ticket-submission">
@@ -620,7 +622,7 @@ export const TicketSubmission: React.FC<TicketSubmissionProps> = ({ token, userR
                     <div
                       role="button"
                       tabIndex={0}
-                      aria-expanded={isExpanded}
+                      aria-expanded={expanded}
                       onClick={() => toggleExpand(t.id)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
