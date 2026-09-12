@@ -89,16 +89,21 @@ export function registerTicketRoutes(app: express.Express) {
         derivedAction = 'Verified & Resolved';
       }
     }
+    updates.actionTaken = derivedAction;
+
     const tickets = await dbStore.getTickets();
     const existingTicket = tickets.find(t => t.id === req.params.id);
+    if (!existingTicket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
 
     // If reclassifying difficulty (e.g. easy -> medium or hard), persist the change in dbStore
     if (reclassifiedBand && ['easy', 'medium', 'hard'].includes(reclassifiedBand)) {
-      const qId = existingTicket?.flagDetails?.questionId;
+      const qId = existingTicket.flagDetails?.questionId;
       if (qId) {
         await dbStore.updateQuestionDifficulty(qId, reclassifiedBand as 'easy' | 'medium' | 'hard');
       }
-      if (existingTicket?.flagDetails) {
+      if (existingTicket.flagDetails) {
         updates.flagDetails = {
           ...existingTicket.flagDetails,
           difficulty: reclassifiedBand as 'easy' | 'medium' | 'hard'

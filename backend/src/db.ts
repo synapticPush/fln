@@ -172,7 +172,6 @@ export interface LevelWorksheet {
   answerKey: any;
   coords: any;
   generatedAt: string;
-  questions?: Question[];
 }
 
 export interface DiagnosticAnswerKey {
@@ -498,6 +497,7 @@ export interface AutoFlagDetails {
   questionId: string;
   questionText: string;
   difficulty: 'easy' | 'medium' | 'hard';
+  originalDifficulty?: 'easy' | 'medium' | 'hard';
   level: number;
   conceptId?: string;
   topic?: string;
@@ -508,6 +508,12 @@ export interface AutoFlagDetails {
   affectedSchools?: string[];
   recommendedBand?: 'medium' | 'hard' | 'same_cohort';
   lastDetectedAt: string;
+}
+
+export interface QuestionDifficultyOverride {
+  questionId: string;
+  effectiveDifficulty: 'easy' | 'medium' | 'hard';
+  updatedAt: string;
 }
 
 export interface Ticket {
@@ -1252,20 +1258,8 @@ export class DBStore {
   // --- Collection Accessors ---
 
   getUserSync(email: string): User | null {
-    const seed = this.getSeedData();
-    const seedUser = seed.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!this.data || !this.data.users) {
-      return seedUser || null;
-    }
-    const found = this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (found) {
-      if (seedUser) {
-        if (!found.schoolId && seedUser.schoolId) found.schoolId = seedUser.schoolId;
-        if (!found.assignedSchools && seedUser.assignedSchools) found.assignedSchools = seedUser.assignedSchools;
-      }
-      return found;
-    }
-    return seedUser || null;
+    if (!this.data || !this.data.users) return null;
+    return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase()) || null;
   }
 
   async getUserByEmail(email: string): Promise<User | null> {
@@ -1279,11 +1273,6 @@ export class DBStore {
           email: { $regex: new RegExp(`^${cleanEmail.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')}$`, 'i') }
         });
         if (u) {
-          const seedUser = this.getUserSync(cleanEmail);
-          if (seedUser) {
-            if (!u.schoolId && seedUser.schoolId) u.schoolId = seedUser.schoolId;
-            if (!u.assignedSchools && seedUser.assignedSchools) u.assignedSchools = seedUser.assignedSchools;
-          }
           if (this.data && this.data.users) {
             const idx = this.data.users.findIndex(x => x.email.toLowerCase() === cleanEmail || x.id === u.id);
             if (idx >= 0) this.data.users[idx] = u;
@@ -1305,16 +1294,8 @@ export class DBStore {
     return this.data?.schools || [];
   }
   async getClasses() {
-    const seedClasses = (this.data?.classes && this.data.classes.length > 0) ? this.data.classes : this.getSeedData().classes;
-    if (this.mongoDb) {
-      const cls = await this.mongoDb.collection<ClassGroup>('classes').find({}).toArray();
-      if (cls && cls.length > 0) {
-        const existingSchoolIds = new Set(cls.map(c => c.schoolId));
-        const missingSeedClasses = seedClasses.filter(sc => !existingSchoolIds.has(sc.schoolId));
-        return [...cls, ...missingSeedClasses];
-      }
-    }
-    return seedClasses;
+    if (this.mongoDb) return await this.mongoDb.collection<ClassGroup>('classes').find({}).toArray();
+    return this.data?.classes || [];
   }
   async getStudents(opts?: { limit?: number; offset?: number; schoolId?: string | string[]; teacherId?: string; sort?: 'latest'; q?: string }) {
     // Search must run BEFORE limit/offset. A previous version of this
@@ -1327,7 +1308,6 @@ export class DBStore {
     // here means the same query Mongo/JS does is also the one that
     // pagination slices.
     const search = (opts?.q || '').trim().toLowerCase();
-    const fallbackStudents = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
     if (this.mongoDb) {
       const filter: any = {};
       if (opts?.schoolId) {
@@ -1343,13 +1323,21 @@ export class DBStore {
         // advertises. The previous version used an unanchored case-insensitive
         // regex (e.g. /foo/i), which CANNOT use a B-tree index in this
         // MongoDB version — every keystroke COLLSCAN'd the 86k-row
-        // collection. The fix is a BSON range { $gte: prefix, $lt: prefix+'' }
+        // collection. The fix is a BSON range { $gte: prefix, $lt: prefix+'￿' }
         // combined with a strength:2 collation on the cursor. Combined with
         // the matching collation-aware indexes (see the `init()` block
         // above), Mongo uses index OR (one IXSCAN per $or branch) and the
         // search runs in single-digit ms.
+        //
+        // The semantic change is "prefix" instead of "substring" — typing
+        // "kar" still finds "Kartik", but typing "artik" no longer matches
+        // "Kartik" via a mid-string substring. This is the smallest
+        // architecturally correct change that preserves the user-typed
+        // search box; the API contract (the ?q= parameter) is unchanged.
+        // The in-memory (file-fallback) path below mirrors this with
+        // .startsWith() so dev and prod return the same results.
         const prefix = search;
-        const upper = prefix + '\uffff';
+        const upper = prefix + '￿';
         filter.$or = [
           { name:        { $gte: prefix, $lt: upper } },
           { displayId:   { $gte: prefix, $lt: upper } },
@@ -1362,29 +1350,39 @@ export class DBStore {
       const skip = opts?.offset || 0;
       const limit = opts?.limit || 0;
       const cursor = this.mongoDb.collection<Student>('students').find(filter);
+      // When the query has a search, use the same collation as the
+      // `*_ci` indexes above. Without this, Mongo falls back to the
+      // simple-binary collation, the index OR is unusable, and we
+      // COLLSCAN the whole collection. With it, index OR turns 6
+      // COLLSCANs into 6 IXSCANs (~1ms each on 86k rows).
       if (search) cursor.collation({ locale: 'en', strength: 2 });
+      // `sort: 'latest'` returns most-recently-inserted first. In Mongo
+      // the natural `_id` ObjectId is time-prefixed, so a descending
+      // sort gives the same intent as "newest at the top" in the
+      // file-fallback store (where students are `push`ed to the array
+      // and we reverse the result). Other sort modes are intentionally
+      // not exposed — the route layer is the only place that names
+      // sort orders.
       if (opts?.sort === 'latest') cursor.sort({ _id: -1 });
       if (skip) cursor.skip(skip);
       if (limit) cursor.limit(limit);
-      const mongoResults = await cursor.toArray();
-      if (mongoResults.length > 0 || !opts?.schoolId) {
-        return mongoResults;
-      }
-      // If Mongo Atlas returns 0 students for this specific seed schoolId (e.g. gps-mt-001),
-      // fall back to seed students so the demo classroom workspace is fully populated.
-      const wanted = Array.isArray(opts.schoolId) ? opts.schoolId : [opts.schoolId];
-      let seedFiltered = fallbackStudents.filter(s => wanted.includes(s.schoolId));
-      if (opts?.teacherId) seedFiltered = seedFiltered.filter(s => s.teacherId === opts.teacherId);
-      if (opts?.limit) seedFiltered = seedFiltered.slice(0, opts.limit);
-      return seedFiltered;
+      return await cursor.toArray();
     }
-    let result = fallbackStudents;
+    let result = this.data?.students || [];
     if (opts?.schoolId) {
       const wanted = Array.isArray(opts.schoolId) ? opts.schoolId : [opts.schoolId];
       result = result.filter(s => wanted.includes(s.schoolId));
     }
     if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
     if (search) {
+      // Same six fields, same case-insensitive PREFIX semantics as the
+      // Mongo $or above (see comment in the Mongo branch). The previous
+      // version used `.includes()` (substring); the new Mongo path is
+      // BSON range + collation, which is prefix-only. We mirror that
+      // here with `.startsWith()` so dev (file-fallback) and prod
+      // (Mongo) return the same rows for the same `q` — otherwise a
+      // dev who types "artik" sees "Kartik" in their file-fallback
+      // results but a prod deploy would not, and vice versa.
       result = result.filter(s => {
         const fields = [
           s.name, s.displayId, s.aadharMasked, s.schoolId, s.classGroup, s.section,
@@ -1395,6 +1393,10 @@ export class DBStore {
         return false;
       });
     }
+    // For the file-fallback store, students are appended to the array
+    // on insert, so the array is in chronological order. Reversing it
+    // gives "latest first" — matching the Mongo sort({ _id: -1 })
+    // path.
     if (opts?.sort === 'latest') result = [...result].reverse();
     if (opts?.offset) result = result.slice(opts.offset);
     if (opts?.limit) result = result.slice(0, opts.limit);
@@ -1409,11 +1411,9 @@ export class DBStore {
    */
   async getStudentById(id: string): Promise<Student | null> {
     if (this.mongoDb) {
-      const st = await this.mongoDb.collection<Student>('students').findOne({ id });
-      if (st) return st;
+      return await this.mongoDb.collection<Student>('students').findOne({ id });
     }
-    const seed = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
-    return seed.find(s => s.id === id) || null;
+    return (this.data?.students || []).find(s => s.id === id) || null;
   }
   async countStudents(opts?: { schoolId?: string; teacherId?: string; q?: string }) {
     // Mirrors getStudents' search semantics so the route's X-Total-Count
@@ -1447,17 +1447,12 @@ export class DBStore {
       // Same collation as the find; required for the *_ci indexes.
       // Without the search path, countDocuments hits the existing
       // schoolId/teacherId indexes and does not need a collation.
-      let mongoCount = 0;
       if (search) {
-        mongoCount = await this.mongoDb.collection('students').countDocuments(filter, { collation: { locale: 'en', strength: 2 } });
-      } else {
-        mongoCount = await this.mongoDb.collection('students').countDocuments(filter);
+        return await this.mongoDb.collection('students').countDocuments(filter, { collation: { locale: 'en', strength: 2 } });
       }
-      if (mongoCount > 0 || !opts?.schoolId) {
-        return mongoCount;
-      }
+      return await this.mongoDb.collection('students').countDocuments(filter);
     }
-    let result = (this.data?.students && this.data.students.length > 0) ? this.data.students : this.getSeedData().students;
+    let result = this.data?.students || [];
     if (opts?.schoolId) result = result.filter(s => s.schoolId === opts.schoolId);
     if (opts?.teacherId) result = result.filter(s => s.teacherId === opts.teacherId);
     if (search) {
@@ -2154,9 +2149,7 @@ export class DBStore {
   }
 
   async addWorksheet(ws: Worksheet) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('worksheets').insertOne(ws);
-    }
+    if (this.mongoDb) await this.mongoDb.collection('worksheets').insertOne(ws);
     if (this.data) {
       this.data.worksheets.push(ws);
       if (!this.mongoDb) await this.save();
@@ -2166,10 +2159,7 @@ export class DBStore {
 
   async addStudentCycleLock(lock: StudentCycleLock) {
     if (this.mongoDb) await this.mongoDb.collection('studentCycleLocks').insertOne(lock as any);
-    if (this.data) {
-      this.data.studentCycleLocks.push(lock);
-      if (!this.mongoDb) await this.save();
-    }
+    if (this.data) this.data.studentCycleLocks.push(lock);
     return lock;
   }
 
@@ -2177,10 +2167,7 @@ export class DBStore {
     if (this.mongoDb) {
       await this.mongoDb.collection('testHistory').insertOne(entry);
     }
-    if (this.data) {
-      this.data.testHistory.push(entry);
-      if (!this.mongoDb) await this.save();
-    }
+    if (this.data) this.data.testHistory.push(entry);
     return entry;
   }
 
@@ -2206,9 +2193,7 @@ export class DBStore {
   }
 
   async addLevelWorksheet(ws: LevelWorksheet) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('levelWorksheets').insertOne(ws);
-    }
+    if (this.mongoDb) await this.mongoDb.collection('levelWorksheets').insertOne(ws);
     if (this.data) {
       this.data.levelWorksheets.push(ws);
       if (!this.mongoDb) await this.save();
@@ -2217,9 +2202,7 @@ export class DBStore {
   }
 
   async addAnswerSubmission(sub: AnswerSubmission) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('answerSubmissions').insertOne(sub);
-    }
+    if (this.mongoDb) await this.mongoDb.collection('answerSubmissions').insertOne(sub);
     if (this.data) {
       this.data.answerSubmissions.push(sub);
       if (!this.mongoDb) await this.save();
@@ -2228,9 +2211,7 @@ export class DBStore {
   }
 
   async addEvaluationReport(rep: EvaluationReport) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('evaluationReports').insertOne(rep);
-    }
+    if (this.mongoDb) await this.mongoDb.collection('evaluationReports').insertOne(rep);
     if (this.data) {
       this.data.evaluationReports.push(rep);
       if (!this.mongoDb) await this.save();
@@ -2252,6 +2233,7 @@ export class DBStore {
       const idx = this.data.evaluationReports.findIndex(r => r.id === id);
       if (idx !== -1) {
         this.data.evaluationReports[idx] = { ...this.data.evaluationReports[idx], ...updates };
+        await this.save();
         return this.data.evaluationReports[idx];
       }
     }
@@ -2288,56 +2270,54 @@ export class DBStore {
     return undefined;
   }
 
-  async updateQuestionDifficulty(questionId: string, newDifficulty: 'easy' | 'medium' | 'hard') {
+  async getQuestionDifficultyOverrides(): Promise<Map<string, 'easy' | 'medium' | 'hard'>> {
+    const map = new Map<string, 'easy' | 'medium' | 'hard'>();
     if (this.mongoDb) {
-      try {
-        await this.mongoDb.collection('worksheets').updateMany(
-          { 'questions.question_id': questionId },
-          { $set: { 'questions.$[elem].difficulty': newDifficulty } },
-          { arrayFilters: [{ 'elem.question_id': questionId }] }
-        );
-        await this.mongoDb.collection('levelWorksheets').updateMany(
-          { 'questions.question_id': questionId },
-          { $set: { 'questions.$[elem].difficulty': newDifficulty } },
-          { arrayFilters: [{ 'elem.question_id': questionId }] }
-        );
-        await this.mongoDb.collection('questionBank').updateMany(
-          { questionId },
-          { $set: { difficulty: newDifficulty } }
-        );
-        await this.mongoDb.collection('questionDifficultyOverrides').updateOne(
-          { questionId },
-          { $set: { questionId, difficulty: newDifficulty, updatedAt: new Date().toISOString() } },
-          { upsert: true }
-        );
-      } catch (err) {
-        console.warn('Error updating question difficulty in Mongo:', err);
-      }
+      const overrides = await this.mongoDb.collection<QuestionDifficultyOverride>('questionDifficultyOverrides').find({}).toArray();
+      overrides.forEach(o => map.set(o.questionId, o.effectiveDifficulty));
+    } else if (this.data && (this.data as any).questionDifficultyOverrides) {
+      (this.data as any).questionDifficultyOverrides.forEach((o: any) => map.set(o.questionId, o.effectiveDifficulty));
+    }
+    return map;
+  }
+
+  async updateQuestionDifficulty(questionId: string, difficulty: 'easy' | 'medium' | 'hard'): Promise<void> {
+    if (this.mongoDb) {
+      await this.mongoDb.collection('questionDifficultyOverrides').updateOne(
+        { questionId },
+        { $set: { questionId, effectiveDifficulty: difficulty, updatedAt: new Date().toISOString() } },
+        { upsert: true }
+      );
+      await this.mongoDb.collection('worksheets').updateMany(
+        { 'questions.question_id': questionId },
+        { $set: { 'questions.$.difficulty': difficulty } }
+      );
+      await this.mongoDb.collection('levelWorksheets').updateMany(
+        { 'questions.question_id': questionId },
+        { $set: { 'questions.$.difficulty': difficulty } }
+      );
     }
     if (this.data) {
-      if (!(this.data as any).questionDifficultyOverrides) {
-        (this.data as any).questionDifficultyOverrides = {};
-      }
-      (this.data as any).questionDifficultyOverrides[questionId] = newDifficulty;
+      if (!(this.data as any).questionDifficultyOverrides) (this.data as any).questionDifficultyOverrides = [];
+      const overrides = (this.data as any).questionDifficultyOverrides;
+      const idx = overrides.findIndex((o: any) => o.questionId === questionId);
+      if (idx !== -1) overrides[idx].effectiveDifficulty = difficulty;
+      else overrides.push({ questionId, effectiveDifficulty: difficulty, updatedAt: new Date().toISOString() });
 
       if (this.data.worksheets) {
         for (const ws of this.data.worksheets) {
-          if (ws.questions && Array.isArray(ws.questions)) {
+          if (ws.questions) {
             for (const q of ws.questions) {
-              if (q.question_id === questionId) {
-                q.difficulty = newDifficulty;
-              }
+              if (q.question_id === questionId) q.difficulty = difficulty;
             }
           }
         }
       }
       if (this.data.levelWorksheets) {
-        for (const ws of this.data.levelWorksheets) {
-          if (ws.questions && Array.isArray(ws.questions)) {
-            for (const q of ws.questions) {
-              if (q.question_id === questionId) {
-                q.difficulty = newDifficulty;
-              }
+        for (const lws of this.data.levelWorksheets) {
+          if (lws.questions) {
+            for (const q of lws.questions) {
+              if (q.question_id === questionId) q.difficulty = difficulty;
             }
           }
         }
@@ -2346,117 +2326,42 @@ export class DBStore {
     }
   }
 
-  async getQuestionDifficultyOverrides(): Promise<Record<string, 'easy' | 'medium' | 'hard'>> {
-    const map: Record<string, 'easy' | 'medium' | 'hard'> = {};
+  async resetAutoFlagState(): Promise<void> {
     if (this.mongoDb) {
-      try {
-        const list = await this.mongoDb.collection('questionDifficultyOverrides').find().toArray();
-        for (const item of list) {
-          if (item.questionId && item.difficulty) {
-            map[item.questionId] = item.difficulty;
-          }
-        }
-      } catch (_e) {
-        // empty collection fallback
-      }
-    }
-    if (this.data && (this.data as any).questionDifficultyOverrides) {
-      Object.assign(map, (this.data as any).questionDifficultyOverrides);
-    }
-    return map;
-  }
-
-  async resetAutoFlagState() {
-    if (this.mongoDb) {
-      // Clear auto-flag and test tickets
-      await this.mongoDb.collection('tickets').deleteMany({
-        $or: [{ isAutoFlag: true }, { subject: { $regex: /^\[AUTO-FLAG/i } }]
-      });
-      // Clear question difficulty overrides
+      await this.mongoDb.collection('tickets').deleteMany({ $or: [{ isAutoFlag: true }, { id: { $regex: '^flag_' } }] });
       await this.mongoDb.collection('questionDifficultyOverrides').deleteMany({});
-      // Clear answer submissions
-      await this.mongoDb.collection('answerSubmissions').deleteMany({});
-      // Clear evaluation reports
-      await this.mongoDb.collection('evaluationReports').deleteMany({});
-      // Clear student cycle locks
-      await this.mongoDb.collection('studentCycleLocks').deleteMany({});
-      // Reset diagnostic state on students
-      await this.mongoDb.collection('students').updateMany(
-        { $or: [{ assignedDiagnosticQuestions: { $exists: true, $ne: [] } }, { currentLevel: { $gt: 1 } }] },
-        { $set: { currentLevel: 1, currentSubLevel: undefined, assignedDiagnosticQuestions: [] } }
-      );
     }
     if (this.data) {
       if (this.data.tickets) {
-        this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !(t.subject && t.subject.startsWith('[AUTO-FLAG')));
+        this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !t.id.startsWith('flag_'));
       }
-      (this.data as any).questionDifficultyOverrides = {};
-      this.data.answerSubmissions = [];
-      this.data.evaluationReports = [];
-      this.data.studentCycleLocks = [];
-      if (this.data.students) {
-        this.data.students.forEach(st => {
-          if ((st.assignedDiagnosticQuestions && st.assignedDiagnosticQuestions.length > 0) || st.currentLevel > 1) {
-            st.currentLevel = 1;
-            st.currentSubLevel = undefined;
-            st.assignedDiagnosticQuestions = [];
-          }
-        });
-      }
-      if (!this.mongoDb) await this.save();
+      await this.save();
     }
   }
 
   async updateUser(userId: string, updates: Partial<User>) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('users').updateOne({ id: userId }, { $set: updates });
-      const u = await this.mongoDb.collection<User>('users').findOne({ id: userId });
-      if (u && this.data) {
-        const idx = this.data.users.findIndex(x => x.id === userId);
-        if (idx !== -1) this.data.users[idx] = u;
-      }
-      return u || undefined;
-    }
-    if (this.data) {
+    await this.mongoDb!.collection('users').updateOne({ id: userId }, { $set: updates });
+    const u = await this.mongoDb!.collection<User>('users').findOne({ id: userId });
+    if (u && this.data) {
       const idx = this.data.users.findIndex(x => x.id === userId);
-      if (idx !== -1) {
-        this.data.users[idx] = { ...this.data.users[idx], ...updates };
-        await this.save();
-        return this.data.users[idx];
-      }
+      if (idx !== -1) this.data.users[idx] = u;
     }
-    return undefined;
+    return u || undefined;
   }
 
   async updateSchool(schoolId: string, updates: Partial<School>) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('schools').updateOne({ id: schoolId }, { $set: updates });
-      const s = await this.mongoDb.collection<School>('schools').findOne({ id: schoolId });
-      if (s && this.data) {
-        const idx = this.data.schools.findIndex(x => x.id === schoolId);
-        if (idx !== -1) this.data.schools[idx] = s;
-      }
-      return s || undefined;
-    }
-    if (this.data) {
+    await this.mongoDb!.collection('schools').updateOne({ id: schoolId }, { $set: updates });
+    const s = await this.mongoDb!.collection<School>('schools').findOne({ id: schoolId });
+    if (s && this.data) {
       const idx = this.data.schools.findIndex(x => x.id === schoolId);
-      if (idx !== -1) {
-        this.data.schools[idx] = { ...this.data.schools[idx], ...updates };
-        await this.save();
-        return this.data.schools[idx];
-      }
+      if (idx !== -1) this.data.schools[idx] = s;
     }
-    return undefined;
+    return s || undefined;
   }
 
   async addSchool(school: School) {
-    if (this.mongoDb) {
-      await this.mongoDb.collection('schools').insertOne(school);
-    }
-    if (this.data) {
-      this.data.schools.push(school);
-      if (!this.mongoDb) await this.save();
-    }
+    await this.mongoDb!.collection('schools').insertOne(school);
+    if (this.data) this.data.schools.push(school);
     return school;
   }
 

@@ -12,7 +12,6 @@ import { resolvePrerequisites, describeConcept, directPrerequisites } from '../c
 import { CURRICULUM_MAPPING } from '../config/curriculumMap';
 import { computeStudentDisplayId } from '../displayId';
 import { tokenizeAadhaar, formatAadhaarMask, AadhaarVaultTokenizeResult } from '../aadhaarVault';
-import { autoFlagService } from '../services/autoFlagService';
 
 // ─── Response hygiene (Phase 2 hardening) ───────────────────────────────────
 // Vault references are internal-only: MongoDB and the internal Student model
