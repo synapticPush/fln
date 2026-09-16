@@ -2208,8 +2208,11 @@ export class DBStore {
   }
 
   async addWorksheet(ws: Worksheet) {
-    await this.mongoDb!.collection('worksheets').insertOne(ws);
-    if (this.data) this.data.worksheets.push(ws);
+    if (this.mongoDb) await this.mongoDb.collection('worksheets').insertOne(ws);
+    if (this.data) {
+      this.data.worksheets.push(ws);
+      if (!this.mongoDb) await this.save();
+    }
     return ws;
   }
 
@@ -2228,30 +2231,50 @@ export class DBStore {
   }
 
   async updateWorksheet(worksheetId: string, updates: Partial<Worksheet>) {
-    await this.mongoDb!.collection('worksheets').updateOne({ id: worksheetId }, { $set: updates });
-    const ws = await this.mongoDb!.collection<Worksheet>('worksheets').findOne({ id: worksheetId });
-    if (ws && this.data) {
-      const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
-      if (idx !== -1) this.data.worksheets[idx] = ws;
+    if (this.mongoDb) {
+      await this.mongoDb.collection('worksheets').updateOne({ id: worksheetId }, { $set: updates });
+      const ws = await this.mongoDb.collection<Worksheet>('worksheets').findOne({ id: worksheetId });
+      if (ws && this.data) {
+        const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
+        if (idx !== -1) this.data.worksheets[idx] = ws;
+      }
+      return ws || undefined;
     }
-    return ws || undefined;
+    if (this.data) {
+      const idx = this.data.worksheets.findIndex(x => x.id === worksheetId);
+      if (idx !== -1) {
+        this.data.worksheets[idx] = { ...this.data.worksheets[idx], ...updates };
+        await this.save();
+        return this.data.worksheets[idx];
+      }
+    }
+    return undefined;
   }
 
   async addLevelWorksheet(ws: LevelWorksheet) {
-    await this.mongoDb!.collection('levelWorksheets').insertOne(ws);
-    if (this.data) this.data.levelWorksheets.push(ws);
+    if (this.mongoDb) await this.mongoDb.collection('levelWorksheets').insertOne(ws);
+    if (this.data) {
+      this.data.levelWorksheets.push(ws);
+      if (!this.mongoDb) await this.save();
+    }
     return ws;
   }
 
   async addAnswerSubmission(sub: AnswerSubmission) {
-    await this.mongoDb!.collection('answerSubmissions').insertOne(sub);
-    if (this.data) this.data.answerSubmissions.push(sub);
+    if (this.mongoDb) await this.mongoDb.collection('answerSubmissions').insertOne(sub);
+    if (this.data) {
+      this.data.answerSubmissions.push(sub);
+      if (!this.mongoDb) await this.save();
+    }
     return sub;
   }
 
   async addEvaluationReport(rep: EvaluationReport) {
-    await this.mongoDb!.collection('evaluationReports').insertOne(rep);
-    if (this.data) this.data.evaluationReports.push(rep);
+    if (this.mongoDb) await this.mongoDb.collection('evaluationReports').insertOne(rep);
+    if (this.data) {
+      this.data.evaluationReports.push(rep);
+      if (!this.mongoDb) await this.save();
+    }
     return rep;
   }
 
@@ -2277,8 +2300,12 @@ export class DBStore {
   }
 
   async addCertification(cert: Certification) {
-    await this.mongoDb!.collection('certifications').insertOne(cert);
-    if (this.data) this.data.certifications.push(cert);
+    if (this.mongoDb) await this.mongoDb.collection('certifications').insertOne(cert);
+    if (this.data) {
+      if (!this.data.certifications) this.data.certifications = [];
+      this.data.certifications.push(cert);
+      if (!this.mongoDb) await this.save();
+    }
     return cert;
   }
 
@@ -2350,8 +2377,12 @@ export class DBStore {
   }
 
   async addTicket(t: Ticket) {
-    await this.mongoDb!.collection('tickets').insertOne(t);
-    if (this.data) this.data.tickets.push(t);
+    if (this.mongoDb) await this.mongoDb.collection('tickets').insertOne(t);
+    if (this.data) {
+      if (!this.data.tickets) this.data.tickets = [];
+      this.data.tickets.push(t);
+      if (!this.mongoDb) await this.save();
+    }
     return t;
   }
 
@@ -2381,6 +2412,8 @@ export class DBStore {
     if (this.mongoDb) {
       const overrides = await this.mongoDb.collection<QuestionDifficultyOverride>('questionDifficultyOverrides').find({}).toArray();
       overrides.forEach(o => map.set(o.questionId, o.effectiveDifficulty));
+    } else if (this.data && (this.data as any).questionDifficultyOverrides) {
+      (this.data as any).questionDifficultyOverrides.forEach((o: any) => map.set(o.questionId, o.effectiveDifficulty));
     }
     return map;
   }
@@ -2392,6 +2425,42 @@ export class DBStore {
         { $set: { questionId, effectiveDifficulty: difficulty, updatedAt: new Date().toISOString() } },
         { upsert: true }
       );
+      await this.mongoDb.collection('worksheets').updateMany(
+        { 'questions.question_id': questionId },
+        { $set: { 'questions.$.difficulty': difficulty } }
+      );
+    }
+    if (this.data) {
+      if (!(this.data as any).questionDifficultyOverrides) (this.data as any).questionDifficultyOverrides = [];
+      const overrides = (this.data as any).questionDifficultyOverrides;
+      const idx = overrides.findIndex((o: any) => o.questionId === questionId);
+      if (idx !== -1) overrides[idx].effectiveDifficulty = difficulty;
+      else overrides.push({ questionId, effectiveDifficulty: difficulty, updatedAt: new Date().toISOString() });
+
+      if (this.data.worksheets) {
+        for (const ws of this.data.worksheets) {
+          if (ws.questions) {
+            for (const q of ws.questions) {
+              if (q.question_id === questionId) q.difficulty = difficulty;
+            }
+          }
+        }
+      }
+      if (!this.mongoDb) await this.save();
+    }
+  }
+
+  async resetAutoFlagState(): Promise<void> {
+    if (this.mongoDb) {
+      await this.mongoDb.collection('tickets').deleteMany({ $or: [{ isAutoFlag: true }, { id: { $regex: '^flag_' } }] });
+      await this.mongoDb.collection('questionDifficultyOverrides').deleteMany({});
+    }
+    if (this.data) {
+      if (this.data.tickets) {
+        this.data.tickets = this.data.tickets.filter(t => !t.isAutoFlag && !t.id.startsWith('flag_'));
+      }
+      (this.data as any).questionDifficultyOverrides = [];
+      if (!this.mongoDb) await this.save();
     }
   }
 
